@@ -66,24 +66,106 @@ impl DataElem<TextureRecord> for TextureRecord {
 
 /////////////// MÉTODOS DE LOS ALGORITMOS ////////////////////
 
-// TODO: Generalizar donde aparezca TextureRecord a cualquier tipo de
-// elemento posible 
-/*
-fn algoritmo_relief(datos: &Vec<TextureRecord>) {
-    let mut pesos = vec![0;TextureRecord::get_num_attributes()];    
+// Hallamos la distancia entre dos elementos vecinos
+
+fn distancia_entre_vecinos(elemento1: TextureRecord, elemento2: TextureRecord) -> f32 {
+    let num_attributes = TextureRecord::get_num_attributes();
+    let mut distancia: f32 = 0.0;
+    for atributo in 0..num_attributes {
+        let dif  = elemento1.get_attribute(atributo) - elemento2.get_attribute(atributo); 
+        distancia += dif * dif;
+    }
+    distancia = distancia.sqrt();
+    
+    return distancia;
 }
-*/
+
+// TODO: Generalizar donde aparezca TextureRecord a cualquier tipo de
+// elemento posible (INVESTIGAR TRAITS)
+
+fn algoritmo_relief(datos: &Vec<TextureRecord>) -> Vec<f32> {
+    let num_attributes = TextureRecord::get_num_attributes();
+    let mut vector_pesos = vec![0.0;num_attributes];
+
+    for miembro in datos.iter() {
+        // Buscamos al enemigo y al amigo más cercano
+        let mut enemigo_mas_cercano_indice = 0;
+        let mut amigo_mas_cercano_indice = 0;
+        let mut dist_enemigo_mas_cercano = std::f32::MAX;
+        let mut dist_amigo_mas_cercano = std::f32::MAX;
+
+        let mut counter = 0;
+        for vecino in datos.iter() {
+            if miembro.get_id() != vecino.get_id() { // Comprobamos que no estemos comparando un objeto consigo mismo
+                let distancia = distancia_entre_vecinos(*miembro, *vecino);
+                // Comprobamos si es "enemigo" y si es mejor que el actual
+                if miembro.get_class() != vecino.get_class() {
+                    if distancia < dist_enemigo_mas_cercano {
+                        dist_enemigo_mas_cercano = distancia;
+                        enemigo_mas_cercano_indice = counter;
+                    }
+                    // Si no es enemigo, es amigo. Comprobamos distancia
+                } else {
+                    if distancia < dist_amigo_mas_cercano {
+                        dist_amigo_mas_cercano = distancia;
+                        amigo_mas_cercano_indice = counter;
+                    }
+                }
+            }
+            counter += 1;
+        }
+        // Componente a componente trabajamos con los pesos del vector
+        // según la distancia a su mejor amigo y enemigo. Clonamos al
+        // amigo y al enemigo para hacer las cuentas
+        let amigo_mas_cercano =
+            datos[amigo_mas_cercano_indice].clone();
+        let enemigo_mas_cercano =
+            datos[enemigo_mas_cercano_indice].clone();
+
+        for componente in 0..num_attributes {
+            let dist_atributo_amigo =
+                (miembro.get_attribute(componente) -
+                 amigo_mas_cercano.get_attribute(componente)).abs();
+            let dist_atributo_enemigo =
+                (miembro.get_attribute(componente) -
+                 enemigo_mas_cercano.get_attribute(componente)).abs();
+            vector_pesos[componente] += dist_atributo_enemigo -
+                                         dist_atributo_amigo;
+        }
+    }
+
+    // Ahora truncamos los valores negativos a cero y se normalizan
+    // los demás dividiendo por el máximo del vector
+
+    let mut maximo = vector_pesos[0];
+    for peso in vector_pesos.iter() {
+        if *peso > maximo {
+            maximo = *peso;
+        }
+    }
+
+    for peso in vector_pesos.iter_mut() {
+        if *peso < 0.0 {
+            *peso = 0.0;
+        } else {
+            *peso /= maximo;
+        }
+    }
+
+    return vector_pesos;
+}
+
 
 // Normalizamos los datos de entrada
 
-pub fn normalize_data(data: &mut Vec<TextureRecord>) {
+ fn normalizar_datos(datos: &mut Vec<TextureRecord>) {
     // Calculamos el máximo y el mínimo para cada atributo  y lo
     // almacenamos en un vector de máximos/mínimos
     let num_attributes = TextureRecord::get_num_attributes();
     let mut maximos = vec![std::f32::MIN; num_attributes];
     let mut minimos = vec![std::f32::MAX; num_attributes];
 
-    for miembro in data.iter() {
+    for miembro in datos.iter() {
         for atributo in 0..num_attributes {
             let valor_actual = miembro.get_attribute(atributo);
             if valor_actual < minimos[atributo] {
@@ -96,7 +178,7 @@ pub fn normalize_data(data: &mut Vec<TextureRecord>) {
     }
 
     // Una vez tenemos los máximos/mínimos normalizamos cada atributo
-    for miembro in data.iter_mut() {
+    for miembro in datos.iter_mut() {
         for atributo in 0..num_attributes {
             miembro.set_attribute(atributo, (miembro.get_attribute(atributo) - minimos[atributo]) / (maximos[atributo] - minimos[atributo]));
         }
@@ -135,9 +217,13 @@ fn execute()  -> Result<(), Box<Error>> {
         data.push(aux_record);
     }
 
-    normalize_data(&mut data);
+    normalizar_datos(&mut data);
 
-    //algoritmo_relief(&data);
+    let pesos_relief: Vec<f32> = algoritmo_relief(&data);
+
+    for peso in pesos_relief.iter() {
+        println!("Peso: {}", peso); 
+    }
 
     
     
