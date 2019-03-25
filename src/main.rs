@@ -120,6 +120,52 @@ fn clasificador_1nn(set_entrenamiento: &Vec<TextureRecord>,
     return (tasa_clas, tasa_red, f_evaluacion);
 }
 
+fn clasificador_1nn_con_pesos(set_entrenamiento: &Vec<TextureRecord>,
+                              set_evaluacion: &Vec<TextureRecord>,
+                              v_pesos: &Vec<f32>)
+                              -> (f32, f32, f32) {
+    let mut v_clasificaciones: Vec<i32> = Vec::new(); // TODO: Tal vez
+    // esto de error con clases que no sean numéricas
+
+    let mut pesos_red = v_pesos.clone();
+    let mut n_reducidos = 0.0;
+   
+    for p in pesos_red.iter_mut() {
+        if *p < 0.2 {
+            *p = 0.0;
+            n_reducidos += 1.0;
+        }
+    }
+    
+    for miembro in set_evaluacion.iter() {
+        let mut clase_vecino_mas_cercano =
+            set_entrenamiento[0].get_class();
+        let mut distancia_vecino_mas_cercano =
+            distancia_ponderada_entre_vecinos(*miembro,
+        set_entrenamiento[0], &pesos_red);
+
+        for vecino in set_entrenamiento.iter() {
+            let distancia =
+            distancia_ponderada_entre_vecinos(*miembro, *vecino,
+            &pesos_red);
+            if distancia < distancia_vecino_mas_cercano {
+                clase_vecino_mas_cercano = vecino.get_class();
+                distancia_vecino_mas_cercano = distancia;
+            }
+        }
+        v_clasificaciones.push(clase_vecino_mas_cercano); 
+    }
+
+    // Obtenemos la tupla resultante
+    let tasa_clas: f32 = tasa_clasificacion(&set_evaluacion,
+                                            &v_clasificaciones);
+    let tasa_red: f32 = 100.0 * n_reducidos / (pesos_red.len() as f32);
+    let f_evaluacion = ALPHA_F_EVALUACION * tasa_clas +
+        (1.0 - ALPHA_F_EVALUACION) * tasa_red;
+
+    return (tasa_clas, tasa_red, f_evaluacion);
+}
+
 fn tasa_clasificacion(set_evaluacion: &Vec<TextureRecord>,
                       v_clasificaciones: &Vec<i32>) -> f32 {
     let mut aciertos = 0.0;
@@ -146,6 +192,22 @@ fn distancia_entre_vecinos(elemento1: TextureRecord, elemento2: TextureRecord) -
     let mut distancia: f32 = 0.0;
     for atributo in 0..num_attributes {
         let dif  = elemento1.get_attribute(atributo) - elemento2.get_attribute(atributo); 
+        distancia += dif * dif;
+    }
+    distancia = distancia.sqrt();
+    
+    return distancia;
+}
+
+fn distancia_ponderada_entre_vecinos(elemento1: TextureRecord,
+                                     elemento2: TextureRecord,
+                                     pesos: &Vec<f32>) -> f32 {
+    let num_attributes = TextureRecord::get_num_attributes();
+    let mut distancia: f32 = 0.0;
+    for atributo in 0..num_attributes {
+        let dif  = (elemento1.get_attribute(atributo) -
+                    elemento2.get_attribute(atributo))
+            * pesos[atributo]; 
         distancia += dif * dif;
     }
     distancia = distancia.sqrt();
@@ -347,14 +409,30 @@ fn execute()  -> Result<(), Box<Error>> {
 
         // Muestra resultados 1nn
         
-        println!("Resultados partición: {} ----------", n_ejecucion);
+        println!("Resultados partición: {} ", n_ejecucion);
         println!("-- Resultados clasificador 1nn");
         println!("\tTasa de clasificación: {}", resultados_1nn.0);
         println!("\tTasa de reducción: {}", resultados_1nn.1);
         println!("\tFunción de evaluación: {}", resultados_1nn.2);
-        println!("\tTiempo de ejecución: {}ms", tiempo_total);
+        println!("\tTiempo de ejecución: {}ms\n", tiempo_total);
 
+        tiempo_inicial = Instant::now();
         
+        let pesos_relief = algoritmo_relief(&conjunto_entrenamiento);
+        let resultados_relief =
+        clasificador_1nn_con_pesos(&conjunto_entrenamiento,
+                                   &conjunto_validacion, &pesos_relief);
+
+        tiempo_total = tiempo_inicial.elapsed().as_millis();
+
+        // Muestra resultados relief
+        
+        println!("-- Resultados clasificador RELIEF");
+        println!("\tTasa de clasificación: {}", resultados_relief.0);
+        println!("\tTasa de reducción: {}", resultados_relief.1);
+        println!("\tFunción de evaluación: {}", resultados_relief.2);
+        println!("\tTiempo de ejecución: {}ms\n", tiempo_total);
+
     }
     
     // Debug: Imprimir
