@@ -4,6 +4,18 @@ extern crate csv;
 use std::error::Error;
 use std::process;
 
+// Diccionarios (usados para mantener distribución de clases uniforme
+// en las particiones
+use std::collections::HashMap;
+
+// Medidas de tiempo
+use std::time::Instant;
+
+
+///////////////// CONSTANTES /////////////////////////////////////
+const NUMERO_PARTICIONES: usize = 5;
+const ALPHA_F_EVALUACION: f32 = 0.5;
+
 ///////////////// ESTRUCTURAS DE DATOS ///////////////////////////
 
 // Template para representar un dato genérico
@@ -66,7 +78,68 @@ impl DataElem<TextureRecord> for TextureRecord {
 
 /////////////// MÉTODOS DE LOS ALGORITMOS ////////////////////
 
+// Algoritmo clasificador 1-NN (asumiendo todos los pesos igual de
+// importantes)
+//
+// Recibe el conjunto de entrenamiento y el de evaluación, clasifica
+// los de evaluación en función de la distancia a los primeros
+//
+// Devuelve una tupla con tasa de clasificación, de reducción (0.0 en
+// este caso) y función de evaluación
+
+fn clasificador_1nn(set_entrenamiento: &Vec<TextureRecord>,
+                    set_evaluacion: &Vec<TextureRecord>)
+                    -> (f32, f32, f32) {
+    let mut v_clasificaciones: Vec<i32> = Vec::new(); // TODO: Tal vez
+    // esto de error con clases que no sean numéricas
+
+    for miembro in set_evaluacion.iter() {
+        let mut clase_vecino_mas_cercano =
+            set_entrenamiento[0].get_class();
+        let mut distancia_vecino_mas_cercano =
+            distancia_entre_vecinos(*miembro, set_entrenamiento[0]);
+
+        for vecino in set_entrenamiento.iter() {
+            let distancia = distancia_entre_vecinos(*miembro, *vecino);
+            if distancia < distancia_vecino_mas_cercano {
+                clase_vecino_mas_cercano = vecino.get_class();
+                distancia_vecino_mas_cercano = distancia;
+            }
+        }
+        v_clasificaciones.push(clase_vecino_mas_cercano); 
+    }
+
+    // Obtenemos la tupla resultante
+    let tasa_clas: f32 = tasa_clasificacion(&set_evaluacion,
+                                            &v_clasificaciones);
+    let tasa_red = 0.0; // Suponemos que todos los pesos ponderan con
+    // 1 y por tanto ninguno es menor que 0.2 y se reduce
+    let f_evaluacion = ALPHA_F_EVALUACION * tasa_clas +
+        (1.0 - ALPHA_F_EVALUACION) * tasa_red;
+
+    return (tasa_clas, tasa_red, f_evaluacion);
+}
+
+fn tasa_clasificacion(set_evaluacion: &Vec<TextureRecord>,
+                      v_clasificaciones: &Vec<i32>) -> f32 {
+    let mut aciertos = 0.0;
+
+    let mut counter = 0;
+    for miembro in set_evaluacion.iter(){
+        if miembro.get_class() == v_clasificaciones[counter] {
+            aciertos += 1.0;
+        }
+        counter += 1;
+    }
+    
+    return 100.0 * aciertos / (set_evaluacion.len() as f32);
+}
+
 // Hallamos la distancia entre dos elementos vecinos
+//
+// Recibe los dos elementos a medir
+//
+// Devuelve la distancia en float
 
 fn distancia_entre_vecinos(elemento1: TextureRecord, elemento2: TextureRecord) -> f32 {
     let num_attributes = TextureRecord::get_num_attributes();
@@ -155,6 +228,28 @@ fn algoritmo_relief(datos: &Vec<TextureRecord>) -> Vec<f32> {
     return vector_pesos;
 }
 
+// Crea particiones con distribución de clases uniforme
+
+fn crear_particiones(datos: &Vec<TextureRecord>) -> Vec<Vec<TextureRecord>> {
+    let mut particiones: Vec<Vec<TextureRecord>> = Vec::new();
+    let mut diccionario_contador_clases = HashMap::new();
+    
+    for _i in 0..NUMERO_PARTICIONES{
+        particiones.push(Vec::new());
+    }
+
+    // Usamos un diccionario para contabilizar las clases y procurar
+    // una distribución uniforme de estas en todas las particiones
+    for muestra in datos.iter() {
+        let counter =
+            diccionario_contador_clases.entry(muestra.get_class()).or_insert(0);
+        particiones[*counter].push(muestra.clone());
+        *counter = (*counter + 1) % NUMERO_PARTICIONES;
+    }
+    
+    return particiones;
+}
+
 
 // Normalizamos los datos de entrada
 
@@ -219,13 +314,48 @@ fn execute()  -> Result<(), Box<Error>> {
 
     normalizar_datos(&mut data);
 
-    let pesos_relief: Vec<f32> = algoritmo_relief(&data);
+    let particiones = crear_particiones(&data);
 
-    for peso in pesos_relief.iter() {
-        println!("Peso: {}", peso); 
+    // Ahora definiremos los conjuntos de entrenamiento y de
+    // validación, 5 pares de conjuntos donde cada par estará formado
+    // por el 80% de los datos (4/5 particiones) para entrenamiento y
+    // 20% (1/5) para validar
+
+    for n_ejecucion in 0..NUMERO_PARTICIONES {
+        let mut conjunto_entrenamiento: Vec<TextureRecord> =
+            Vec::new();
+        let mut conjunto_validacion: Vec<TextureRecord> = Vec::new();
+
+        for particion in 0..NUMERO_PARTICIONES {
+            if n_ejecucion != particion {
+                conjunto_entrenamiento.extend(&particiones[particion]);
+            } else {
+                conjunto_validacion = particiones[particion].clone();
+            }
+        }
+
+        // Utilizamos el clasificador k-nn con k = 1 para evaluar
+        // nuestro algoritmo con estos conjuntos de entrenamiento y
+        // test
+
+        let mut tiempo_inicial = Instant::now();
+        
+        let resultados_1nn = clasificador_1nn(&conjunto_entrenamiento,
+                                              &conjunto_validacion);
+        
+        let mut tiempo_total = tiempo_inicial.elapsed().as_millis();
+
+        // Muestra resultados 1nn
+        
+        println!("Resultados partición: {} ----------", n_ejecucion);
+        println!("-- Resultados clasificador 1nn");
+        println!("\tTasa de clasificación: {}", resultados_1nn.0);
+        println!("\tTasa de reducción: {}", resultados_1nn.1);
+        println!("\tFunción de evaluación: {}", resultados_1nn.2);
+        println!("\tTiempo de ejecución: {}ms", tiempo_total);
+
+        
     }
-
-    
     
     // Debug: Imprimir
     
