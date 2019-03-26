@@ -18,7 +18,7 @@ const ALPHA_F_EVALUACION: f32 = 0.5;
 
 ///////////////// ESTRUCTURAS DE DATOS ///////////////////////////
 
-// Template para representar un dato genérico
+// Interfaz para trabajar con un tipo de dato genérico
 pub trait DataElem<T> {
     fn new() -> T;
     fn get_num_attributes() -> usize;
@@ -38,6 +38,7 @@ pub struct TextureRecord {
     class: i32,
 }
 
+// Implementación de la interfaz DataElem<T> para TextureRecord
 impl DataElem<TextureRecord> for TextureRecord {
     fn new() -> TextureRecord {
         TextureRecord {
@@ -87,9 +88,11 @@ impl DataElem<TextureRecord> for TextureRecord {
 // Devuelve una tupla con tasa de clasificación, de reducción (0.0 en
 // este caso) y función de evaluación
 
-fn clasificador_1nn(set_entrenamiento: &Vec<TextureRecord>,
-                    set_evaluacion: &Vec<TextureRecord>)
-                    -> (f32, f32, f32) {
+fn clasificador_1nn<T: DataElem<T> + Copy + Clone>(
+    set_entrenamiento: &Vec<T>,
+    set_evaluacion: &Vec<T>)
+    -> (f32, f32, f32) {
+
     let mut v_clasificaciones: Vec<i32> = Vec::new(); // TODO: Tal vez
     // esto de error con clases que no sean numéricas
 
@@ -120,10 +123,12 @@ fn clasificador_1nn(set_entrenamiento: &Vec<TextureRecord>,
     return (tasa_clas, tasa_red, f_evaluacion);
 }
 
-fn clasificador_1nn_con_pesos(set_entrenamiento: &Vec<TextureRecord>,
-                              set_evaluacion: &Vec<TextureRecord>,
-                              v_pesos: &Vec<f32>)
-                              -> (f32, f32, f32) {
+fn clasificador_1nn_con_pesos<T: DataElem<T> + Copy + Clone>(
+    set_entrenamiento: &Vec<T>,
+    set_evaluacion: &Vec<T>,
+    v_pesos: &Vec<f32>)
+    -> (f32, f32, f32) {
+
     let mut v_clasificaciones: Vec<i32> = Vec::new(); // TODO: Tal vez
     // esto de error con clases que no sean numéricas
 
@@ -166,8 +171,11 @@ fn clasificador_1nn_con_pesos(set_entrenamiento: &Vec<TextureRecord>,
     return (tasa_clas, tasa_red, f_evaluacion);
 }
 
-fn tasa_clasificacion(set_evaluacion: &Vec<TextureRecord>,
-                      v_clasificaciones: &Vec<i32>) -> f32 {
+fn tasa_clasificacion<T: DataElem<T> + Copy + Clone>(
+    set_evaluacion: &Vec<T>,
+    v_clasificaciones: &Vec<i32>)
+    -> f32 {
+    
     let mut aciertos = 0.0;
 
     let mut counter = 0;
@@ -187,8 +195,12 @@ fn tasa_clasificacion(set_evaluacion: &Vec<TextureRecord>,
 //
 // Devuelve la distancia en float
 
-fn distancia_entre_vecinos(elemento1: TextureRecord, elemento2: TextureRecord) -> f32 {
-    let num_attributes = TextureRecord::get_num_attributes();
+fn distancia_entre_vecinos<T: DataElem<T> + Copy + Clone>(
+    elemento1: T,
+    elemento2: T)
+    -> f32 {
+    
+    let num_attributes = T::get_num_attributes();
     let mut distancia: f32 = 0.0;
     for atributo in 0..num_attributes {
         let dif  = elemento1.get_attribute(atributo) - elemento2.get_attribute(atributo); 
@@ -199,10 +211,13 @@ fn distancia_entre_vecinos(elemento1: TextureRecord, elemento2: TextureRecord) -
     return distancia;
 }
 
-fn distancia_ponderada_entre_vecinos(elemento1: TextureRecord,
-                                     elemento2: TextureRecord,
-                                     pesos: &Vec<f32>) -> f32 {
-    let num_attributes = TextureRecord::get_num_attributes();
+fn distancia_ponderada_entre_vecinos<T: DataElem<T> + Copy + Clone>(
+    elemento1: T,
+    elemento2: T,
+    pesos: &Vec<f32>)
+    -> f32 {
+    
+    let num_attributes = T::get_num_attributes();
     let mut distancia: f32 = 0.0;
     for atributo in 0..num_attributes {
         let dif  = (elemento1.get_attribute(atributo) -
@@ -215,11 +230,11 @@ fn distancia_ponderada_entre_vecinos(elemento1: TextureRecord,
     return distancia;
 }
 
-// TODO: Generalizar donde aparezca TextureRecord a cualquier tipo de
-// elemento posible (INVESTIGAR TRAITS)
-
-fn algoritmo_relief(datos: &Vec<TextureRecord>) -> Vec<f32> {
-    let num_attributes = TextureRecord::get_num_attributes();
+fn algoritmo_relief<T: DataElem<T> + Copy + Clone>(
+    datos: &Vec<T>)
+    -> Vec<f32> {
+    
+    let num_attributes = T::get_num_attributes();
     let mut vector_pesos = vec![0.0;num_attributes];
 
     for miembro in datos.iter() {
@@ -292,8 +307,11 @@ fn algoritmo_relief(datos: &Vec<TextureRecord>) -> Vec<f32> {
 
 // Crea particiones con distribución de clases uniforme
 
-fn crear_particiones(datos: &Vec<TextureRecord>) -> Vec<Vec<TextureRecord>> {
-    let mut particiones: Vec<Vec<TextureRecord>> = Vec::new();
+fn crear_particiones<T: DataElem<T> + Copy + Clone>(
+    datos: &Vec<T>)
+    -> Vec<Vec<T>> {
+    
+    let mut particiones: Vec<Vec<T>> = Vec::new();
     let mut diccionario_contador_clases = HashMap::new();
     
     for _i in 0..NUMERO_PARTICIONES{
@@ -315,7 +333,9 @@ fn crear_particiones(datos: &Vec<TextureRecord>) -> Vec<Vec<TextureRecord>> {
 
 // Normalizamos los datos de entrada
 
- fn normalizar_datos(datos: &mut Vec<TextureRecord>) {
+fn normalizar_datos<T: DataElem<T> + Copy + Clone>(
+    datos: &mut Vec<T>) {
+    
     // Calculamos el máximo y el mínimo para cada atributo  y lo
     // almacenamos en un vector de máximos/mínimos
     let num_attributes = TextureRecord::get_num_attributes();
@@ -407,9 +427,12 @@ fn execute()  -> Result<(), Box<Error>> {
         
         let mut tiempo_total = tiempo_inicial.elapsed().as_millis();
 
+        // Resultados
+        println!("-----------------------------------------");
+        println!("Resultados partición: {} ", n_ejecucion);
+        
         // Muestra resultados 1nn
         
-        println!("Resultados partición: {} ", n_ejecucion);
         println!("-- Resultados clasificador 1nn");
         println!("\tTasa de clasificación: {}", resultados_1nn.0);
         println!("\tTasa de reducción: {}", resultados_1nn.1);
