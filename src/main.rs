@@ -1,3 +1,4 @@
+// Leer csv
 extern crate csv;
 
 // Control de errores
@@ -11,10 +12,17 @@ use std::collections::HashMap;
 // Medidas de tiempo
 use std::time::Instant;
 
+// Generador números aleatorios
+extern crate rand;
+use rand::distributions::{Distribution, Normal, Uniform};
+use rand::thread_rng;
+use rand::seq::SliceRandom; // Para poder mezclar con shuffle
 
 ///////////////// CONSTANTES /////////////////////////////////////
 const NUMERO_PARTICIONES: usize = 5;
-const ALPHA_F_EVALUACION: f32 = 0.5;
+const ALPHA_F_OBJETIVO: f32 = 0.5;
+const MAXIMO_EVALUACIONES_F_OBJ: usize = 15000;
+const VARIANZA_MUTACIONES: f64 = 0.3;
 
 ///////////////// ESTRUCTURAS DE DATOS ///////////////////////////
 
@@ -86,7 +94,7 @@ impl DataElem<TextureRecord> for TextureRecord {
 // los de evaluación en función de la distancia a los primeros
 //
 // Devuelve una tupla con tasa de clasificación, de reducción (0.0 en
-// este caso) y función de evaluación
+// este caso) y función objetivo
 
 fn clasificador_1nn<T: DataElem<T> + Copy + Clone>(
     set_entrenamiento: &Vec<T>,
@@ -117,10 +125,10 @@ fn clasificador_1nn<T: DataElem<T> + Copy + Clone>(
                                             &v_clasificaciones);
     let tasa_red = 0.0; // Suponemos que todos los pesos ponderan con
     // 1 y por tanto ninguno es menor que 0.2 y se reduce
-    let f_evaluacion = ALPHA_F_EVALUACION * tasa_clas +
-        (1.0 - ALPHA_F_EVALUACION) * tasa_red;
+    let f_objetivo = ALPHA_F_OBJETIVO * tasa_clas +
+        (1.0 - ALPHA_F_OBJETIVO) * tasa_red;
 
-    return (tasa_clas, tasa_red, f_evaluacion);
+    return (tasa_clas, tasa_red, f_objetivo);
 }
 
 fn clasificador_1nn_con_pesos<T: DataElem<T> + Copy + Clone>(
@@ -150,12 +158,15 @@ fn clasificador_1nn_con_pesos<T: DataElem<T> + Copy + Clone>(
         set_entrenamiento[0], &pesos_red);
 
         for vecino in set_entrenamiento.iter() {
-            let distancia =
-            distancia_ponderada_entre_vecinos(*miembro, *vecino,
-            &pesos_red);
-            if distancia < distancia_vecino_mas_cercano {
-                clase_vecino_mas_cercano = vecino.get_class();
-                distancia_vecino_mas_cercano = distancia;
+            if miembro.get_id() != vecino.get_id() { // En caso de que
+                // set_entrenamiento = set_evaluacion
+                let distancia =
+                    distancia_ponderada_entre_vecinos(*miembro, *vecino,
+                                                      &pesos_red);
+                if distancia < distancia_vecino_mas_cercano {
+                    clase_vecino_mas_cercano = vecino.get_class();
+                    distancia_vecino_mas_cercano = distancia;
+                }
             }
         }
         v_clasificaciones.push(clase_vecino_mas_cercano); 
@@ -165,10 +176,10 @@ fn clasificador_1nn_con_pesos<T: DataElem<T> + Copy + Clone>(
     let tasa_clas: f32 = tasa_clasificacion(&set_evaluacion,
                                             &v_clasificaciones);
     let tasa_red: f32 = 100.0 * n_reducidos / (pesos_red.len() as f32);
-    let f_evaluacion = ALPHA_F_EVALUACION * tasa_clas +
-        (1.0 - ALPHA_F_EVALUACION) * tasa_red;
+    let f_objetivo = ALPHA_F_OBJETIVO * tasa_clas +
+        (1.0 - ALPHA_F_OBJETIVO) * tasa_red;
 
-    return (tasa_clas, tasa_red, f_evaluacion);
+    return (tasa_clas, tasa_red, f_objetivo);
 }
 
 fn tasa_clasificacion<T: DataElem<T> + Copy + Clone>(
@@ -229,6 +240,8 @@ fn distancia_ponderada_entre_vecinos<T: DataElem<T> + Copy + Clone>(
     
     return distancia;
 }
+
+// Algoritmo Relief (Greedy)
 
 fn algoritmo_relief<T: DataElem<T> + Copy + Clone>(
     datos: &Vec<T>)
@@ -305,6 +318,80 @@ fn algoritmo_relief<T: DataElem<T> + Copy + Clone>(
     return vector_pesos;
 }
 
+// Búsqueda Local
+
+fn busqueda_local<T: DataElem<T> + Copy + Clone>(
+    datos: &Vec<T>)
+    -> Vec<f32> {
+    let num_attributes = T::get_num_attributes();
+    let mut rng = thread_rng(); // Para generar números aleatorios
+
+    // Generamos el vector aleatorio inicial
+    let mut pesos: Vec<f32> = vec![0.0; num_attributes];
+    let distribucion_uniforme = Uniform::new(0.0, 1.0);
+    let distribucion_normal = Normal::new(0.0, VARIANZA_MUTACIONES);
+    for atributo in 0..num_attributes {
+        pesos[atributo] = distribucion_uniforme.sample(&mut rng);
+    }
+
+    // Generamos un vector de índices y lo desordenamos para
+    // proporcionar aleatoriedad en el proceso de mejora de un
+    // atributo (peso de una característica) al azar
+    let mut indices: Vec<usize> = (0..num_attributes).collect();
+    indices.shuffle(&mut rng);
+    
+    let mut n_mutaciones = 0;
+    let mut n_vecinos_gen_sin_mejorar = 0;
+    let max_vecinos_gen_sin_mejorar = 20 * num_attributes;
+
+    // Comprobamos la calidad de estos pesos 
+    let mut mejor_f_obj = clasificador_1nn_con_pesos(&datos, &datos,
+                                                  &pesos).2;
+
+    //println!("F obj inicial: {}", mejor_f_obj);
+
+    while n_vecinos_gen_sin_mejorar < max_vecinos_gen_sin_mejorar &&
+        n_mutaciones < MAXIMO_EVALUACIONES_F_OBJ {
+            let mut pesos_aux = pesos.clone();
+
+            if indices.is_empty() {
+                indices = (0..num_attributes).collect();
+                indices.shuffle(&mut rng);
+            }
+
+            let indice_a_mejorar = indices.pop().expect("Vector vacío");
+
+            pesos_aux[indice_a_mejorar] +=
+                distribucion_normal.sample(&mut rng) as f32;
+            if pesos_aux[indice_a_mejorar] < 0.0 {
+                pesos_aux[indice_a_mejorar] = 0.0;
+            } else if pesos_aux[indice_a_mejorar] > 1.0 {
+                pesos_aux[indice_a_mejorar] = 1.0;
+            }
+
+            let f_obj_actual = clasificador_1nn_con_pesos(&datos,
+                                                          &datos, &pesos_aux).2;
+
+            if f_obj_actual > mejor_f_obj {
+                pesos = pesos_aux;
+                mejor_f_obj = f_obj_actual;
+                n_vecinos_gen_sin_mejorar = 0;
+
+                // Resetear indices
+                indices = (0..num_attributes).collect();
+                indices.shuffle(&mut rng);
+                //debug
+                //println!("Vector de pesos mejorado. F_obj: {}",
+                //mejor_f_obj);
+            } else {
+                n_vecinos_gen_sin_mejorar += 1;
+            }
+            n_mutaciones += 1;
+        }    
+    
+    return pesos;
+    
+}
 // Crea particiones con distribución de clases uniforme
 
 fn crear_particiones<T: DataElem<T> + Copy + Clone>(
@@ -415,7 +502,7 @@ fn execute()  -> Result<(), Box<Error>> {
                 conjunto_validacion = particiones[particion].clone();
             }
         }
-
+        
         // Utilizamos el clasificador k-nn con k = 1 para evaluar
         // nuestro algoritmo con estos conjuntos de entrenamiento y
         // test
@@ -436,7 +523,7 @@ fn execute()  -> Result<(), Box<Error>> {
         println!("-- Resultados clasificador 1nn");
         println!("\tTasa de clasificación: {}", resultados_1nn.0);
         println!("\tTasa de reducción: {}", resultados_1nn.1);
-        println!("\tFunción de evaluación: {}", resultados_1nn.2);
+        println!("\tFunción objetivo: {}", resultados_1nn.2);
         println!("\tTiempo de ejecución: {}ms\n", tiempo_total);
 
         tiempo_inicial = Instant::now();
@@ -453,7 +540,27 @@ fn execute()  -> Result<(), Box<Error>> {
         println!("-- Resultados clasificador RELIEF");
         println!("\tTasa de clasificación: {}", resultados_relief.0);
         println!("\tTasa de reducción: {}", resultados_relief.1);
-        println!("\tFunción de evaluación: {}", resultados_relief.2);
+        println!("\tFunción objetivo: {}", resultados_relief.2);
+        println!("\tTiempo de ejecución: {}ms\n", tiempo_total);
+
+        // Búsqueda local
+
+        tiempo_inicial = Instant::now();
+        
+        let pesos_busqueda_local =
+            busqueda_local(&conjunto_entrenamiento);
+
+        let resultados_bl =
+        clasificador_1nn_con_pesos(&conjunto_entrenamiento,
+                                   &conjunto_validacion,
+                                   &pesos_busqueda_local); 
+
+        tiempo_total = tiempo_inicial.elapsed().as_millis();
+
+        println!("-- Resultados clasificador búsqueda local");
+        println!("\tTasa de clasificación: {}", resultados_bl.0);
+        println!("\tTasa de reducción: {}", resultados_bl.1);
+        println!("\tFunción objetivo: {}", resultados_bl.2);
         println!("\tTiempo de ejecución: {}ms\n", tiempo_total);
 
     }
