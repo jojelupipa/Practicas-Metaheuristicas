@@ -24,6 +24,10 @@ const ALPHA_F_OBJETIVO: f32 = 0.5;
 const MAXIMO_EVALUACIONES_F_OBJ: usize = 15000;
 const VARIANZA_MUTACIONES: f64 = 0.3;
 
+const CARACTERISTICAS_IONOSFERA: usize = 34;
+const CARACTERISTICAS_TEXTURA: usize = 40;
+const CARACTERISTICAS_COLPOSCPIA: usize = 62;
+
 ///////////////// ESTRUCTURAS DE DATOS ///////////////////////////
 
 // Interfaz para trabajar con un tipo de dato genérico
@@ -42,7 +46,7 @@ pub trait DataElem<T> {
 #[derive(Copy, Clone)]
 pub struct TextureRecord {
     id: i32,
-    attributes: [f32; 40],
+    attributes: [f32; CARACTERISTICAS_TEXTURA],
     class: i32,
 }
 
@@ -51,13 +55,107 @@ impl DataElem<TextureRecord> for TextureRecord {
     fn new() -> TextureRecord {
         TextureRecord {
             id: -1,
-            attributes: [0.0; 40],
+            attributes: [0.0; CARACTERISTICAS_TEXTURA],
             class: -1,
         }
     }
 
     fn get_num_attributes() -> usize {
-        return 40;
+        return CARACTERISTICAS_TEXTURA;
+    }
+
+    fn get_id(&self) -> i32 {
+        return self.id;
+    }
+
+    fn get_class(&self) -> i32 {
+        return self.class;
+    }
+
+    fn get_attribute(&self, index: usize) -> f32 {
+        return self.attributes[index];
+    }
+
+    fn set_id(&mut self, id: i32) {
+        self.id = id;
+    }
+
+    fn set_class(&mut self, class: i32) {
+        self.class = class;
+    }
+
+    fn set_attribute(&mut self, index: usize, attr: f32) {
+        self.attributes[index] = attr;
+    }
+}
+
+// Estructura de datos para almacenar las texturas
+#[derive(Copy, Clone)]
+pub struct IonosphereRecord {
+    id: i32,
+    attributes: [f32; CARACTERISTICAS_IONOSFERA],
+    class: i32,
+}
+
+// Implementación de la interfaz DataElem<T> para IonosphereRecord
+impl DataElem<IonosphereRecord> for IonosphereRecord {
+    fn new() -> IonosphereRecord {
+        IonosphereRecord {
+            id: -1,
+            attributes: [0.0; CARACTERISTICAS_IONOSFERA],
+            class: -1,
+        }
+    }
+
+    fn get_num_attributes() -> usize {
+        return CARACTERISTICAS_IONOSFERA;
+    }
+
+    fn get_id(&self) -> i32 {
+        return self.id;
+    }
+
+    fn get_class(&self) -> i32 {
+        return self.class;
+    }
+
+    fn get_attribute(&self, index: usize) -> f32 {
+        return self.attributes[index];
+    }
+
+    fn set_id(&mut self, id: i32) {
+        self.id = id;
+    }
+
+    fn set_class(&mut self, class: i32) {
+        self.class = class;
+    }
+
+    fn set_attribute(&mut self, index: usize, attr: f32) {
+        self.attributes[index] = attr;
+    }
+}
+
+// Estructura de datos para almacenar las colposcopias
+#[derive(Copy, Clone)]
+pub struct ColposcopyRecord {
+    id: i32,
+    attributes: [f32; CARACTERISTICAS_COLPOSCPIA],
+    class: i32,
+}
+
+// Implementación de la interfaz DataElem<T> para ColposcopyRecord
+impl DataElem<ColposcopyRecord> for ColposcopyRecord {
+    fn new() -> ColposcopyRecord {
+        ColposcopyRecord {
+            id: -1,
+            attributes: [0.0; CARACTERISTICAS_COLPOSCPIA],
+            class: -1,
+        }
+    }
+
+    fn get_num_attributes() -> usize {
+        return CARACTERISTICAS_COLPOSCPIA;
     }
 
     fn get_id(&self) -> i32 {
@@ -425,7 +523,7 @@ fn normalizar_datos<T: DataElem<T> + Copy + Clone>(
     
     // Calculamos el máximo y el mínimo para cada atributo  y lo
     // almacenamos en un vector de máximos/mínimos
-    let num_attributes = TextureRecord::get_num_attributes();
+    let num_attributes = T::get_num_attributes();
     let mut maximos = vec![std::f32::MIN; num_attributes];
     let mut minimos = vec![std::f32::MAX; num_attributes];
 
@@ -452,25 +550,28 @@ fn normalizar_datos<T: DataElem<T> + Copy + Clone>(
 
 // Método principal: Ejecuta el código de la práctica
 
-fn execute()  -> Result<(), Box<Error>> {
+fn execute<T: DataElem<T> + Copy + Clone>(
+    path: &str)
+    -> Result<(), Box<Error>> {
+
     // Reads data, then works with it
-    let mut data: Vec<TextureRecord> = Vec::new();
-    let mut rdr = csv::Reader::from_path("data/texture.csv")?;
+    let mut data: Vec<T> = Vec::new();
+    let mut rdr = csv::Reader::from_path(&path)?;
 
     let mut current_id = 0;
     for result in rdr.records() {
-        let mut aux_record = TextureRecord::new();
+        let mut aux_record = T::new();
         let record = result?;
 
         let mut counter = 0;
 
-        aux_record.id = current_id;
+        aux_record.set_id(current_id);
 
         for field in record.iter() {
-            if counter != TextureRecord::get_num_attributes() {
-                aux_record.attributes[counter] = field.parse::<f32>().unwrap();
+            if counter != T::get_num_attributes() {
+                aux_record.set_attribute(counter, field.parse::<f32>().unwrap());
             } else {
-                aux_record.class = field.parse::<i32>().unwrap();
+                aux_record.set_class(field.parse::<i32>().unwrap());
             }
 
             counter += 1;
@@ -491,9 +592,9 @@ fn execute()  -> Result<(), Box<Error>> {
     // 20% (1/5) para validar
 
     for n_ejecucion in 0..NUMERO_PARTICIONES {
-        let mut conjunto_entrenamiento: Vec<TextureRecord> =
+        let mut conjunto_entrenamiento: Vec<T> =
             Vec::new();
-        let mut conjunto_validacion: Vec<TextureRecord> = Vec::new();
+        let mut conjunto_validacion: Vec<T> = Vec::new();
 
         for particion in 0..NUMERO_PARTICIONES {
             if n_ejecucion != particion {
@@ -563,28 +664,30 @@ fn execute()  -> Result<(), Box<Error>> {
         println!("\tFunción objetivo: {}", resultados_bl.2);
         println!("\tTiempo de ejecución: {}ms\n", tiempo_total);
 
-    }
-    
-    // Debug: Imprimir
-    
-    /*
-    let mut counter2 = 0;
-    for data_record in data.iter() {
-        println!("Dato {}", counter2);
-        
-        for miau in 0..TextureRecord::get_num_attributes() {
-            println!("Atr {}: {}", miau, data_record.get_attribute(miau));
-        }
-        counter2 += 1;
-    }
-     */
-     
+    }     
     
     Ok(())
 }
 
 fn main() {
-    if let Err(err) = execute() {
+
+    println!("-----------------------------------------");
+    println!("Análisis para el archivo: colposcopy");
+    if let Err(err) = execute::<ColposcopyRecord>("data/colposcopy.csv") {
+        println!("error: {}", err);
+        process::exit(1);
+    }
+    
+    println!("-----------------------------------------");
+    println!("Análisis para el archivo: ionosphere");
+    if let Err(err) = execute::<IonosphereRecord>("data/ionosphere.csv") {
+        println!("error: {}", err);
+        process::exit(1);
+    }
+    
+    println!("-----------------------------------------");
+    println!("Análisis para el archivo: texture");
+    if let Err(err) = execute::<TextureRecord>("data/texture.csv") {
         println!("error: {}", err);
         process::exit(1);
     }
