@@ -15,8 +15,9 @@ use std::time::Instant;
 // Generador números aleatorios
 extern crate rand;
 use rand::distributions::{Distribution, Normal, Uniform};
-use rand::thread_rng;
+//use rand::thread_rng;
 use rand::seq::SliceRandom; // Para poder mezclar con shuffle
+use rand::prelude::*;
 
 ///////////////// CONSTANTES /////////////////////////////////////
 const NUMERO_PARTICIONES: usize = 5;
@@ -28,6 +29,7 @@ const CARACTERISTICAS_IONOSFERA: usize = 34;
 const CARACTERISTICAS_TEXTURA: usize = 40;
 const CARACTERISTICAS_COLPOSCPIA: usize = 62;
 
+const SEED_U64: u64 = 4;
 ///////////////// ESTRUCTURAS DE DATOS ///////////////////////////
 
 // Interfaz para trabajar con un tipo de dato genérico
@@ -422,7 +424,7 @@ fn busqueda_local<T: DataElem<T> + Copy + Clone>(
     datos: &Vec<T>)
     -> Vec<f32> {
     let num_attributes = T::get_num_attributes();
-    let mut rng = thread_rng(); // Para generar números aleatorios
+    let mut rng: StdRng = SeedableRng::seed_from_u64(SEED_U64); // Para generar números aleatorios
 
     // Generamos el vector aleatorio inicial
     let mut pesos: Vec<f32> = vec![0.0; num_attributes];
