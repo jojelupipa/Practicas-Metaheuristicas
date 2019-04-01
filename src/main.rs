@@ -19,6 +19,9 @@ use rand::distributions::{Distribution, Normal, Uniform};
 use rand::seq::SliceRandom; // Para poder mezclar con shuffle
 use rand::prelude::*;
 
+// Manejo argumentos (para indicar la semilla)
+use std::env;
+
 ///////////////// CONSTANTES /////////////////////////////////////
 const NUMERO_PARTICIONES: usize = 5;
 const ALPHA_F_OBJETIVO: f32 = 0.5;
@@ -29,7 +32,6 @@ const CARACTERISTICAS_IONOSFERA: usize = 34;
 const CARACTERISTICAS_TEXTURA: usize = 40;
 const CARACTERISTICAS_COLPOSCPIA: usize = 62;
 
-const SEED_U64: u64 = 4;
 ///////////////// ESTRUCTURAS DE DATOS ///////////////////////////
 
 // Interfaz para trabajar con un tipo de dato genérico
@@ -421,10 +423,11 @@ fn algoritmo_relief<T: DataElem<T> + Copy + Clone>(
 // Búsqueda Local
 
 fn busqueda_local<T: DataElem<T> + Copy + Clone>(
-    datos: &Vec<T>)
+    datos: &Vec<T>,
+    seed_u64: u64)
     -> Vec<f32> {
     let num_attributes = T::get_num_attributes();
-    let mut rng: StdRng = SeedableRng::seed_from_u64(SEED_U64); // Para generar números aleatorios
+    let mut rng: StdRng = SeedableRng::seed_from_u64(seed_u64); // Para generar números aleatorios
 
     // Generamos el vector aleatorio inicial
     let mut pesos: Vec<f32> = vec![0.0; num_attributes];
@@ -553,7 +556,8 @@ fn normalizar_datos<T: DataElem<T> + Copy + Clone>(
 // Método principal: Ejecuta el código de la práctica
 
 fn execute<T: DataElem<T> + Copy + Clone>(
-    path: &str)
+    path: &str,
+    seed_u64: u64)
     -> Result<(), Box<Error>> {
 
     // Reads data, then works with it
@@ -651,7 +655,7 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         tiempo_inicial = Instant::now();
         
         let pesos_busqueda_local =
-            busqueda_local(&conjunto_entrenamiento);
+            busqueda_local(&conjunto_entrenamiento, seed_u64);
 
         let resultados_bl =
         clasificador_1nn_con_pesos(&conjunto_entrenamiento,
@@ -673,23 +677,33 @@ fn execute<T: DataElem<T> + Copy + Clone>(
 
 fn main() {
 
+    let args: Vec<_> = env::args().collect();
+    let mut seed_u64: u64 = 4;
+    
+    if args.len() == 2 {
+        seed_u64 = args[1].parse::<u64>().unwrap();
+        println!("Se usará como semilla: {}", seed_u64);
+    } else if args.len() > 2 {
+        println!("* Formato incorrecto, se usará 4 como semilla.\nPara usar una semilla concreta utilice cargo run --release <semilla>");
+    }
+    
     println!("-----------------------------------------");
     println!("Análisis para el archivo: colposcopy");
-    if let Err(err) = execute::<ColposcopyRecord>("data/colposcopy.csv") {
+    if let Err(err) = execute::<ColposcopyRecord>("data/colposcopy.csv", seed_u64) {
         println!("error: {}", err);
         process::exit(1);
     }
     
     println!("-----------------------------------------");
     println!("Análisis para el archivo: ionosphere");
-    if let Err(err) = execute::<IonosphereRecord>("data/ionosphere.csv") {
+    if let Err(err) = execute::<IonosphereRecord>("data/ionosphere.csv", seed_u64) {
         println!("error: {}", err);
         process::exit(1);
     }
     
     println!("-----------------------------------------");
     println!("Análisis para el archivo: texture");
-    if let Err(err) = execute::<TextureRecord>("data/texture.csv") {
+    if let Err(err) = execute::<TextureRecord>("data/texture.csv", seed_u64) {
         println!("error: {}", err);
         process::exit(1);
     }
