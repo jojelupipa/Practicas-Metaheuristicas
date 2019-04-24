@@ -547,7 +547,9 @@ fn normalizar_datos<T: DataElem<T> + Copy + Clone>(
     // Una vez tenemos los máximos/mínimos normalizamos cada atributo
     for miembro in datos.iter_mut() {
         for atributo in 0..num_attributes {
-            miembro.set_attribute(atributo, (miembro.get_attribute(atributo) - minimos[atributo]) / (maximos[atributo] - minimos[atributo]));
+            if maximos[atributo] - minimos[atributo] != 0.0 {
+                miembro.set_attribute(atributo, (miembro.get_attribute(atributo) - minimos[atributo]) / (maximos[atributo] - minimos[atributo]));
+            }
         }
     }
 }
@@ -689,22 +691,23 @@ fn main() {
     
     println!("-----------------------------------------");
     println!("Análisis para el archivo: colposcopy");
-    if let Err(err) = execute::<ColposcopyRecord>("data/colposcopy.csv", seed_u64) {
+    if let Err(err) = execute::<ColposcopyRecord>("../data/colposcopy.csv", seed_u64) {
         println!("error: {}", err);
         process::exit(1);
     }
-    
+       
     println!("-----------------------------------------");
     println!("Análisis para el archivo: ionosphere");
-    if let Err(err) = execute::<IonosphereRecord>("data/ionosphere.csv", seed_u64) {
+    if let Err(err) = execute::<IonosphereRecord>("../data/ionosphere.csv", seed_u64) {
         println!("error: {}", err);
         process::exit(1);
     }
     
     println!("-----------------------------------------");
     println!("Análisis para el archivo: texture");
-    if let Err(err) = execute::<TextureRecord>("data/texture.csv", seed_u64) {
+    if let Err(err) = execute::<TextureRecord>("../data/texture.csv", seed_u64) {
         println!("error: {}", err);
         process::exit(1);
     }
+
 }
