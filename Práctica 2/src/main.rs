@@ -27,6 +27,8 @@ const NUMERO_PARTICIONES: usize = 5;
 const ALPHA_F_OBJETIVO: f32 = 0.5;
 const MAXIMO_EVALUACIONES_F_OBJ: usize = 15000;
 const VARIANZA_MUTACIONES: f64 = 0.3;
+const PROB_CRUCE_AGG: f32 = 0.7;
+const PROB_MUTACION: f32 = 0.001;
 
 const TAM_POBLACION: usize = 30;
 
@@ -197,15 +199,6 @@ enum VarianteCruce {
     ARIT,
 }
 
-// Enum para indicar la variante de la selección. Con 2 padres o con
-// tantos padres como tenga la población original
-
-#[derive(PartialEq)]
-enum VarianteSeleccion {
-    DOS_PADRES,
-    MULTIPLES_PADRES,
-}
-
 
 /////////////// MÉTODOS DE LOS ALGORITMOS ////////////////////
 
@@ -308,7 +301,7 @@ fn clasificador_1nn_con_pesos<T: DataElem<T> + Copy + Clone>(
     let tasa_clas: f32 = tasa_clasificacion(&set_evaluacion,
                                             &v_clasificaciones);
     let tasa_red: f32 = tasa_reduccion(n_reducidos,
-                                       (pesos_red.len() as f32)); 
+                                       pesos_red.len() as f32); 
     let f_objetivo = funcion_objetivo(tasa_clas, tasa_red);
 
     return (tasa_clas, tasa_red, f_objetivo);
@@ -559,7 +552,10 @@ fn alg_genetico_elitista<T: DataElem<T> + Copy + Clone>(
     let mut rng: StdRng = SeedableRng::seed_from_u64(seed_u64); // Para generar números aleatorios
     let mut pesos: Vec<f32> = vec![0.0; num_attributes];
 
+    // Distribución para la inicialización
     let distribucion_uniforme = Uniform::new(0.0, 1.0);
+    // Distribución para las mutaciones
+    let distribucion_normal = Normal::new(0.0, VARIANZA_MUTACIONES); 
         
     // Generar población inicial
     let mut poblacion: Vec<Vec<f32>> =
@@ -596,7 +592,6 @@ fn alg_genetico_elitista<T: DataElem<T> + Copy + Clone>(
                                            &poblacion[0]).2
             )
         );
-
         for i in 0..poblacion.len() {
             if i != mejor_cromosoma {
                 pob_evaluada.push(
@@ -614,51 +609,28 @@ fn alg_genetico_elitista<T: DataElem<T> + Copy + Clone>(
                 }        
             }
         }
+        
+        contador_evaluaciones += TAM_POBLACION;
 
         //// Seleccionamos padres mediante torneo binario
         
         let mut seleccionados: Vec<(Vec<f32>, f32)> =
             Vec::with_capacity(TAM_POBLACION);
 
-        // Comprobamos si se ha introducido el mejor cromosoma segun
-        // rellenamos nuestra futura población para evitar buscarlo
-        // posteriormente en caso de que haya que introducirlo. A su
-        // vez calculamos el peor que se ha introducido hasta el
-        // momento por el mismo motivo. 
-        let mut introducido_mejor_cromosoma = false;
-        let mut peor_cromosoma_introducido = 0;
-    
         let mut rng_tmp = thread_rng();
         let tam_poblacion_padres = TAM_POBLACION * 2;
-        while seleccionados.len() <  {
+        while seleccionados.len() < tam_poblacion_padres {
             let candidato1 = rng_tmp.gen_range(0, TAM_POBLACION);
             let candidato2 = rng_tmp.gen_range(0, TAM_POBLACION);
 
-            let ganador = torneoBinario(candidato1,
+            let ganador = torneo_binario(candidato1,
                                         candidato2,
                                         &pob_evaluada);
-            if ganador == mejor_cromosoma {
-                introducido_mejor_cromosoma = true;
-            }
             seleccionados.push(pob_evaluada[ganador].clone());
-            
-            // Actualizamos el peor cromosoma introducido para ahorrar
-            // tiempo buscándolo posteriormente.
-            if seleccionados[peor_cromosoma_introducido].1 >
-                pob_evaluada[ganador].1 {
-                    peor_cromosoma_introducido = seleccionados.len()-1;
-                }
-        }
-
-        // Si no se ha metido el mejor cromosoma, aplicamos el
-        // elitismo sustituyendo al peor cromosoma introducido
-        if !introducido_mejor_cromosoma {
-            seleccionados.remove(peor_cromosoma_introducido);
-            seleccionados.push(pob_evaluada[mejor_cromosoma].clone());
         }
 
         // DEBUG: Mostrar padres seleccionados pre mutaciones
-        // println!("Iter: {}. Tamaño pob: {}", contador_evaluaciones ,seleccionados.len());
+        // println!("Iter: {}. Tamaño pob padres: {}", contador_evaluaciones ,seleccionados.len());
         // for i in 0..seleccionados.len() {
         //     println!("Cromosoma: {} , fitness: {}", i, seleccionados[i].1);
         // }
@@ -669,17 +641,146 @@ fn alg_genetico_elitista<T: DataElem<T> + Copy + Clone>(
 
         // Cruce. Actuamos en función de si es cruce aritmético o BLX
 
+       
+        let mut pob_provisional: Vec<(Vec<f32>, f32)> =
+            Vec::with_capacity(TAM_POBLACION);
+        
         if variante_cruce == VarianteCruce::ARIT {
+            let mut i = 0;
+            let n_cruces: usize = ((tam_poblacion_padres as f32) *
+                                   PROB_CRUCE_AGG).trunc() as usize;
+            while i < n_cruces {
+                let mut cromosoma = Vec::with_capacity(num_attributes);
+                for j in 0..num_attributes {
+                    let gen = (seleccionados[i].0[j] +
+                                   seleccionados[i+1].0[j]) / 2.0;
+                    cromosoma.push(gen);
+                }
+                
+                pob_provisional.push(
+                    (cromosoma.clone(),
+                     clasificador_1nn_con_pesos(&datos,
+                                                &datos,
+                                                &cromosoma).2
+                    )
+                );
+                    
+                // println!("P1:{} \nP2:{} \nHijo:{}",
+                //          seleccionados[i].0[0], seleccionados[i+1].0[0],
+                //          cromosoma[0]);
+                
+                i += 2;
+            }
             
+            contador_evaluaciones += n_cruces;
+
+            let mut counter = n_cruces; // Introducimos desde el
+            // último candidato a reproducirse hasta que se llene la
+            // población
+            while pob_provisional.len() < TAM_POBLACION {
+                pob_provisional.push(
+                    (seleccionados[counter].0.clone(),
+                     seleccionados[counter].1
+                    )
+                );
+                counter += 1;
+            }
+            
+        } else if variante_cruce == VarianteCruce::BLX {
+            // TODO: Implementar BLX
+        }
+
+        // Mutamos el número de genes esperado
+        let mutaciones_esperadas = (num_attributes as f32 *
+                                    TAM_POBLACION as f32 *
+                                    PROB_MUTACION
+        ).trunc() as usize;
+
+        let mut mut_realizadas = 0;
+        while mut_realizadas < mutaciones_esperadas {
+            let cromosoma_mut = rng_tmp.gen_range(0, TAM_POBLACION);
+            let gen_mut = rng_tmp.gen_range(0, num_attributes);
+
+            let mut pesos_aux =
+            pob_provisional[cromosoma_mut].0.clone(); 
+            
+            pesos_aux[gen_mut] +=
+                distribucion_normal.sample(&mut rng) as f32;
+            if pesos_aux[gen_mut] < 0.0 {
+                pesos_aux[gen_mut] = 0.0;
+            } else if pesos_aux[gen_mut] > 1.0 {
+                pesos_aux[gen_mut] = 1.0;
+            }
+
+            pob_provisional.remove(cromosoma_mut);
+            pob_provisional.push(
+                (pesos_aux.clone(),
+                 clasificador_1nn_con_pesos(&datos,
+                                            &datos,
+                                            &pesos_aux).2
+                )
+            );
+            
+            mut_realizadas += 1;
         }
         
-        // poblacion = Vec::with_capacity(TAM_POBLACION);
-        // for i in 0..
-        
-        //// Evaluamos población
+        contador_evaluaciones += mutaciones_esperadas;
 
-        contador_evaluaciones += 1;
+        // Remplazo y elitismo
+
+        // Buscamos si la mejor solución está en la población
+        // provisional
+        let f_mejor_cromosoma_gen_anterior =
+            clasificador_1nn_con_pesos(&datos,
+                                       &datos,
+                                       &poblacion[mejor_cromosoma]).2;
+        let mut mejor_crom_introducido = false;
+        let mut peor_cromosoma = 0;
+        let mut peor_f = pob_provisional[0].1;
+        let mut mejor_cromosoma_actual = 0;
+        let mut mejor_f = pob_provisional[0].1;
+        
+        for i in 0..pob_provisional.len() {
+            let f_actual = pob_provisional[i].1;
+            if f_actual == f_mejor_cromosoma_gen_anterior {
+                mejor_crom_introducido = true;
+            }
+
+            if f_actual < peor_f {
+                peor_cromosoma = i;
+                peor_f = f_actual;
+            }
+            if f_actual > mejor_f {
+                mejor_cromosoma_actual = i;
+                mejor_f = f_actual;
+            }
+        }
+
+        
+        if f_mejor_cromosoma_gen_anterior < mejor_f {
+            pesos = pob_provisional[mejor_cromosoma_actual].0.clone();
+        } else {
+            pesos = poblacion[mejor_cromosoma].clone();
+        }
+        
+        if !mejor_crom_introducido {
+            pob_provisional.remove(peor_cromosoma);
+            pob_provisional.push(
+                (poblacion[mejor_cromosoma].clone(),
+                 f_mejor_cromosoma_gen_anterior)
+            );   
+        }
+        
+        
+        
+        poblacion = Vec::with_capacity(TAM_POBLACION);
+        let mut i = 0;
+        for cromosoma in pob_provisional.iter_mut() {
+            poblacion.push(cromosoma.0.clone());
+        }
+
     }
+
     
     return pesos;
 }
@@ -754,7 +855,7 @@ fn normalizar_datos<T: DataElem<T> + Copy + Clone>(
 //
 // Devuelve el índice del ganador
 
-fn torneoBinario(
+fn torneo_binario(
     candidato1: usize,
     candidato2: usize,
     pob_evaluada: &Vec<(Vec<f32>,f32)>)
@@ -886,8 +987,7 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         println!("\tTiempo de ejecución: {}ms\n", tiempo_total);
 
          */
-        println!("Comienza el AGG");
-        let mut variante_cruce = VarianteCruce::BLX;
+        let mut variante_cruce = VarianteCruce::ARIT;
         let pesos_agg = alg_genetico_elitista(&conjunto_entrenamiento,
         seed_u64, variante_cruce);
         let resultados_agg =
@@ -895,7 +995,15 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         &conjunto_validacion, &pesos_agg); 
 
         tiempo_total = tiempo_inicial.elapsed().as_millis();
-        
+
+
+        println!("-- Resultados algoritmo genético generacional. Cruce
+        aritmético. Elitista.");
+        println!("\tTasa de clasificación: {}", resultados_agg.0);
+        println!("\tTasa de reducción: {}", resultados_agg.1);
+        println!("\tFunción objetivo: {}", resultados_agg.2);
+        println!("\tTiempo de ejecución: {}ms\n", tiempo_total);
+
     }     
     
     Ok(())
