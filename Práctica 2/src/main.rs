@@ -19,6 +19,9 @@ use rand::distributions::{Distribution, Normal, Uniform};
 use rand::seq::SliceRandom; // Para poder mezclar con shuffle
 use rand::prelude::*;
 
+// Comparar, maximos, mínimos...
+use std::cmp; 
+
 // Manejo argumentos (para indicar la semilla)
 use std::env;
 
@@ -29,6 +32,7 @@ const MAXIMO_EVALUACIONES_F_OBJ: usize = 15000;
 const VARIANZA_MUTACIONES: f64 = 0.3;
 const PROB_CRUCE_AGG: f32 = 0.7;
 const PROB_MUTACION: f32 = 0.001;
+const BLX_VALUE: f64 = 0.3;
 
 const TAM_POBLACION: usize = 30;
 
@@ -617,11 +621,10 @@ fn alg_genetico_elitista<T: DataElem<T> + Copy + Clone>(
         let mut seleccionados: Vec<(Vec<f32>, f32)> =
             Vec::with_capacity(TAM_POBLACION);
 
-        let mut rng_tmp = thread_rng();
         let tam_poblacion_padres = TAM_POBLACION * 2;
         while seleccionados.len() < tam_poblacion_padres {
-            let candidato1 = rng_tmp.gen_range(0, TAM_POBLACION);
-            let candidato2 = rng_tmp.gen_range(0, TAM_POBLACION);
+            let candidato1 = rng.gen_range(0, TAM_POBLACION);
+            let candidato2 = rng.gen_range(0, TAM_POBLACION);
 
             let ganador = torneo_binario(candidato1,
                                         candidato2,
@@ -644,11 +647,12 @@ fn alg_genetico_elitista<T: DataElem<T> + Copy + Clone>(
        
         let mut pob_provisional: Vec<(Vec<f32>, f32)> =
             Vec::with_capacity(TAM_POBLACION);
-        
+
+        let n_cruces: usize = ((tam_poblacion_padres as f32) *
+                                   PROB_CRUCE_AGG).trunc() as usize;
+            
         if variante_cruce == VarianteCruce::ARIT {
             let mut i = 0;
-            let n_cruces: usize = ((tam_poblacion_padres as f32) *
-                                   PROB_CRUCE_AGG).trunc() as usize;
             while i < n_cruces {
                 let mut cromosoma = Vec::with_capacity(num_attributes);
                 for j in 0..num_attributes {
@@ -673,21 +677,67 @@ fn alg_genetico_elitista<T: DataElem<T> + Copy + Clone>(
             }
             
             contador_evaluaciones += n_cruces;
-
-            let mut counter = n_cruces; // Introducimos desde el
-            // último candidato a reproducirse hasta que se llene la
-            // población
-            while pob_provisional.len() < TAM_POBLACION {
-                pob_provisional.push(
-                    (seleccionados[counter].0.clone(),
-                     seleccionados[counter].1
-                    )
-                );
-                counter += 1;
-            }
             
         } else if variante_cruce == VarianteCruce::BLX {
-            // TODO: Implementar BLX
+                        let mut i = 0;
+            while i < n_cruces {
+                let mut cromosoma = Vec::with_capacity(num_attributes);
+                for j in 0..num_attributes {
+                    let cmax;
+                    let cmin;
+                    
+                    if seleccionados[i].0[j] > seleccionados[i+1].0[j] {
+                        cmax = seleccionados[i].0[j];
+                        cmin = seleccionados[i+1].0[j];
+                    } else {
+                        cmin = seleccionados[i].0[j];
+                        cmax = seleccionados[i+1].0[j];
+                    } 
+                    let interval = (cmax - cmin) * BLX_VALUE as f32;
+
+                    let mut gen;
+                    if cmax != cmin {
+                        gen = rng.gen_range(cmin - interval, cmax +
+                                            interval);
+                        if gen < 0.0 {
+                            gen = 0.0;
+                        } else if gen > 1.0 {
+                            gen = 0.0;
+                        }
+                        
+                    } else {
+                        gen = seleccionados[i].0[j];
+                    }
+                    cromosoma.push(gen);
+                }
+                
+                pob_provisional.push(
+                    (cromosoma.clone(),
+                     clasificador_1nn_con_pesos(&datos,
+                                                &datos,
+                                                &cromosoma).2
+                    )
+                );
+                    
+
+                i += 2;
+            }
+            
+            contador_evaluaciones += n_cruces;
+        }
+
+        // Completamos la población con padres de la anterior
+        // generación
+        let mut counter = n_cruces; // Introducimos desde el
+        // último candidato a reproducirse hasta que se llene la
+        // población
+        while pob_provisional.len() < TAM_POBLACION {
+            pob_provisional.push(
+                (seleccionados[counter].0.clone(),
+                 seleccionados[counter].1
+                )
+            );
+            counter += 1;
         }
 
         // Mutamos el número de genes esperado
@@ -698,8 +748,8 @@ fn alg_genetico_elitista<T: DataElem<T> + Copy + Clone>(
 
         let mut mut_realizadas = 0;
         while mut_realizadas < mutaciones_esperadas {
-            let cromosoma_mut = rng_tmp.gen_range(0, TAM_POBLACION);
-            let gen_mut = rng_tmp.gen_range(0, num_attributes);
+            let cromosoma_mut = rng.gen_range(0, TAM_POBLACION);
+            let gen_mut = rng.gen_range(0, num_attributes);
 
             let mut pesos_aux =
             pob_provisional[cromosoma_mut].0.clone(); 
@@ -936,11 +986,11 @@ fn execute<T: DataElem<T> + Copy + Clone>(
                                               &conjunto_validacion);
         
         let mut tiempo_total = tiempo_inicial.elapsed().as_millis();
-/*
+
         // Resultados
         println!("-----------------------------------------");
         println!("Resultados partición: {} ", n_ejecucion);
-        
+/*        
         // Muestra resultados 1nn
         
         println!("-- Resultados clasificador 1nn");
@@ -986,7 +1036,7 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         println!("\tFunción objetivo: {}", resultados_bl.2);
         println!("\tTiempo de ejecución: {}ms\n", tiempo_total);
 
-         */
+*/
         let mut variante_cruce = VarianteCruce::ARIT;
         let pesos_agg = alg_genetico_elitista(&conjunto_entrenamiento,
         seed_u64, variante_cruce);
@@ -997,8 +1047,23 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         tiempo_total = tiempo_inicial.elapsed().as_millis();
 
 
-        println!("-- Resultados algoritmo genético generacional. Cruce
-        aritmético. Elitista.");
+        println!("-- Resultados algoritmo genético generacional. Cruce aritmético. Elitista.");
+        println!("\tTasa de clasificación: {}", resultados_agg.0);
+        println!("\tTasa de reducción: {}", resultados_agg.1);
+        println!("\tFunción objetivo: {}", resultados_agg.2);
+        println!("\tTiempo de ejecución: {}ms\n", tiempo_total);
+
+        variante_cruce = VarianteCruce::BLX;
+        let pesos_agg_blx = alg_genetico_elitista(&conjunto_entrenamiento,
+        seed_u64, variante_cruce);
+        let resultados_agg =
+        clasificador_1nn_con_pesos(&conjunto_entrenamiento,
+        &conjunto_validacion, &pesos_agg_blx); 
+
+        tiempo_total = tiempo_inicial.elapsed().as_millis();
+
+
+        println!("-- Resultados algoritmo genético generacional. Cruce BLX. Elitista.");
         println!("\tTasa de clasificación: {}", resultados_agg.0);
         println!("\tTasa de reducción: {}", resultados_agg.1);
         println!("\tFunción objetivo: {}", resultados_agg.2);
