@@ -19,9 +19,6 @@ use rand::distributions::{Distribution, Normal, Uniform};
 use rand::seq::SliceRandom; // Para poder mezclar con shuffle
 use rand::prelude::*;
 
-// Comparar, maximos, mínimos...
-use std::cmp; 
-
 // Manejo argumentos (para indicar la semilla)
 use std::env;
 
@@ -35,6 +32,7 @@ const PROB_MUTACION: f32 = 0.001;
 const BLX_VALUE: f64 = 0.3;
 
 const TAM_POBLACION: usize = 30;
+const PADRES_ESTACIONARIO: usize = 2;
 
 const CARACTERISTICAS_IONOSFERA: usize = 34;
 const CARACTERISTICAS_TEXTURA: usize = 40;
@@ -545,34 +543,25 @@ fn busqueda_local<T: DataElem<T> + Copy + Clone>(
 }
 
 
-// Algoritmo genético con remplazo elitista
-fn alg_genetico_elitista<T: DataElem<T> + Copy + Clone>(
+// Algoritmo genético estacionario con remplazo elitista
+fn alg_genetico_generacional_elitista<T: DataElem<T> + Copy + Clone>(
     datos: &Vec<T>,
     seed_u64: u64,
     variante_cruce: VarianteCruce)
     -> Vec<f32> {
     
     let num_attributes = T::get_num_attributes();
-    let mut rng: StdRng = SeedableRng::seed_from_u64(seed_u64); // Para generar números aleatorios
+    let mut rng: StdRng = SeedableRng::seed_from_u64(seed_u64); // Para generar números aleatorios con una semilla
     let mut pesos: Vec<f32> = vec![0.0; num_attributes];
 
-    // Distribución para la inicialización
-    let distribucion_uniforme = Uniform::new(0.0, 1.0);
     // Distribución para las mutaciones
     let distribucion_normal = Normal::new(0.0, VARIANZA_MUTACIONES); 
         
     // Generar población inicial
     let mut poblacion: Vec<Vec<f32>> =
-    Vec::with_capacity(TAM_POBLACION); 
+        Vec::with_capacity(TAM_POBLACION);
 
-    // Inicializamos los cromosomas
-    for i in 0..TAM_POBLACION {
-        poblacion.push(Vec::with_capacity(num_attributes));
-        for _ in 0..num_attributes {
-            poblacion[i].push(distribucion_uniforme.sample(&mut rng));
-            
-        }
-    }
+    inicializar_poblacion(&mut poblacion, &mut rng, num_attributes);
 
     // Mientras no se cumpla la condición de parada: 15000
     // evaluaciones
@@ -633,7 +622,7 @@ fn alg_genetico_elitista<T: DataElem<T> + Copy + Clone>(
         }
 
         // DEBUG: Mostrar padres seleccionados pre mutaciones
-        // println!("Iter: {}. Tamaño pob padres: {}", contador_evaluaciones ,seleccionados.len());
+        //println!("Evaluaciones: {}. Tamaño pob padres: {}", contador_evaluaciones ,seleccionados.len());
         // for i in 0..seleccionados.len() {
         //     println!("Cromosoma: {} , fitness: {}", i, seleccionados[i].1);
         // }
@@ -652,30 +641,7 @@ fn alg_genetico_elitista<T: DataElem<T> + Copy + Clone>(
                                    PROB_CRUCE_AGG).trunc() as usize;
             
         if variante_cruce == VarianteCruce::ARIT {
-            let mut i = 0;
-            while i < n_cruces {
-                let mut cromosoma = Vec::with_capacity(num_attributes);
-                for j in 0..num_attributes {
-                    let gen = (seleccionados[i].0[j] +
-                                   seleccionados[i+1].0[j]) / 2.0;
-                    cromosoma.push(gen);
-                }
-                
-                pob_provisional.push(
-                    (cromosoma.clone(),
-                     clasificador_1nn_con_pesos(&datos,
-                                                &datos,
-                                                &cromosoma).2
-                    )
-                );
-                    
-                // println!("P1:{} \nP2:{} \nHijo:{}",
-                //          seleccionados[i].0[0], seleccionados[i+1].0[0],
-                //          cromosoma[0]);
-                
-                i += 2;
-            }
-            
+            cruce_aritmetico(&datos, &seleccionados, &mut pob_provisional, n_cruces, num_attributes);
             contador_evaluaciones += n_cruces;
             
         } else if variante_cruce == VarianteCruce::BLX {
@@ -784,6 +750,10 @@ fn alg_genetico_elitista<T: DataElem<T> + Copy + Clone>(
             clasificador_1nn_con_pesos(&datos,
                                        &datos,
                                        &poblacion[mejor_cromosoma]).2;
+        // println!("Eval: {} Mejor padre fitness: {}, ",
+        //          contador_evaluaciones,
+        //          f_mejor_cromosoma_gen_anterior); 
+
         let mut mejor_crom_introducido = false;
         let mut peor_cromosoma = 0;
         let mut peor_f = pob_provisional[0].1;
@@ -831,6 +801,152 @@ fn alg_genetico_elitista<T: DataElem<T> + Copy + Clone>(
 
     }
 
+    
+    return pesos;
+}
+
+fn alg_genetico_estacionario<T: DataElem<T> + Copy + Clone>(
+    datos: &Vec<T>,
+    seed_u64: u64,
+    variante_cruce: VarianteCruce)
+    -> Vec<f32> {
+
+    let num_attributes = T::get_num_attributes();
+    let mut rng: StdRng = SeedableRng::seed_from_u64(seed_u64); // Para generar números aleatorios con una semilla
+    let mut pesos: Vec<f32> = vec![0.0; num_attributes];
+
+    // Distribución para las mutaciones
+    let distribucion_normal = Normal::new(0.0, VARIANZA_MUTACIONES); 
+
+    
+    // Generar población inicial
+    let mut poblacion: Vec<Vec<f32>> =
+        Vec::with_capacity(TAM_POBLACION);
+
+    inicializar_poblacion(&mut poblacion, &mut rng, num_attributes);
+    
+    // Mientras no se cumpla la condición de parada: 15000
+    // evaluaciones
+    let mut contador_evaluaciones: usize = 0;
+
+    while contador_evaluaciones < MAXIMO_EVALUACIONES_F_OBJ {
+
+        // Evaluamos esta población
+        let mut pob_evaluada: Vec<(Vec<f32>, f32)> =
+            Vec::with_capacity(TAM_POBLACION);
+        
+        for i in 0..poblacion.len() {
+            pob_evaluada.push(
+                (
+                    poblacion[i].clone(),
+                    clasificador_1nn_con_pesos(&datos,
+                                               &datos,
+                                               &poblacion[i]).2
+                )
+            );
+        }
+        
+        contador_evaluaciones += TAM_POBLACION;
+
+        
+        // Seleccionamos los dos padres para el estacionario
+        let mut seleccionados: Vec<(Vec<f32>, f32)> =
+            Vec::with_capacity(PADRES_ESTACIONARIO);
+        
+        while seleccionados.len() < PADRES_ESTACIONARIO {
+            let candidato1 = rng.gen_range(0, TAM_POBLACION);
+            let candidato2 = rng.gen_range(0, TAM_POBLACION);
+
+            let ganador = torneo_binario(candidato1,
+                                         candidato2,
+                                         &pob_evaluada);
+            seleccionados.push(pob_evaluada[ganador].clone());
+        }
+
+        let mut pob_provisional: Vec<(Vec<f32>, f32)> =
+            Vec::with_capacity(TAM_POBLACION);
+        
+        let n_cruces: usize = 30;
+        
+        // Ahora cruzamos los padres hasta obtener la población de la
+        // siguiente generación
+        if variante_cruce == VarianteCruce::ARIT {
+            cruce_aritmetico(&datos, &seleccionados, &mut pob_provisional, n_cruces, num_attributes);
+        } else {
+            //TODO BLX
+        }
+
+        // Mutamos el número de genes esperado
+        let mutaciones_esperadas = (num_attributes as f32 *
+                                    TAM_POBLACION as f32 *
+                                    PROB_MUTACION
+        ).trunc() as usize;
+
+        let mut mut_realizadas = 0;
+        while mut_realizadas < mutaciones_esperadas {
+            let cromosoma_mut = rng.gen_range(0, TAM_POBLACION);
+            let gen_mut = rng.gen_range(0, num_attributes);
+
+            let mut pesos_aux =
+                pob_provisional[cromosoma_mut].0.clone(); 
+            
+            pesos_aux[gen_mut] +=
+                distribucion_normal.sample(&mut rng) as f32;
+            if pesos_aux[gen_mut] < 0.0 {
+                pesos_aux[gen_mut] = 0.0;
+            } else if pesos_aux[gen_mut] > 1.0 {
+                pesos_aux[gen_mut] = 1.0;
+            }
+
+            pob_provisional.remove(cromosoma_mut);
+            pob_provisional.push(
+                (pesos_aux.clone(),
+                 0.0
+                )
+            );
+            
+            mut_realizadas += 1;
+        }
+        
+        // Reemplazamos la antigua población con la nueva
+        poblacion = Vec::with_capacity(TAM_POBLACION);
+        for cromosoma in pob_provisional.iter_mut() {
+            poblacion.push(cromosoma.0.clone());
+        }
+    }
+
+    // Ahora buscamos el mejor cromosoma en la población final para
+    // devolverlo como solución
+    let mut mejor_cromosoma = 0;
+    let mut pob_evaluada: Vec<(Vec<f32>, f32)> =
+        Vec::with_capacity(TAM_POBLACION); 
+        pob_evaluada.push(
+            (
+                poblacion[0].clone(),
+                clasificador_1nn_con_pesos(&datos,
+                                           &datos,
+                                           &poblacion[0]).2
+            )
+        );
+        for i in 0..poblacion.len() {
+            if i != mejor_cromosoma {
+                pob_evaluada.push(
+                    (
+                        poblacion[i].clone(),
+                        clasificador_1nn_con_pesos(&datos,
+                                                   &datos,
+                                                   &poblacion[i]).2
+                    )
+                );
+
+                if pob_evaluada[i].1 > pob_evaluada[mejor_cromosoma].1
+                {
+                    mejor_cromosoma = i;
+                }        
+            }
+        }
+
+    pesos = pob_evaluada[mejor_cromosoma].0.clone();
     
     return pesos;
 }
@@ -897,6 +1013,77 @@ fn normalizar_datos<T: DataElem<T> + Copy + Clone>(
         }
     }
 }
+//////////////////////////////////////////////////
+///// Procedimientos generales genéticos /////////
+//////////////////////////////////////////////////
+
+
+fn inicializar_poblacion(
+    poblacion: &mut Vec<Vec<f32>>,
+    mut rng: &mut StdRng,
+    num_attributes: usize) {
+// Distribución para la inicialización
+let distribucion_uniforme = Uniform::new(0.0, 1.0);
+
+ // Inicializamos los cromosomas
+    for i in 0..TAM_POBLACION {
+        poblacion.push(Vec::with_capacity(num_attributes));
+        for _ in 0..num_attributes {
+            poblacion[i].push(distribucion_uniforme.sample(&mut rng));            
+        }
+    }
+}
+
+fn cruce_aritmetico<T: DataElem<T> + Copy + Clone>(
+    datos: &Vec<T>,
+    seleccionados: & Vec<(Vec<f32>, f32)>,
+    pob_provisional: &mut Vec<(Vec<f32>, f32)>,
+    n_cruces: usize,
+    num_attributes: usize) {
+    
+    let mut i = 0;
+    while i < n_cruces {
+        let mut cromosoma = Vec::with_capacity(num_attributes);
+        for j in 0..num_attributes {
+            let gen;
+            if seleccionados.len() > 2 { // Distinguimos estacionario
+                // de generacional cuando hay más de dos padres 
+                gen = (seleccionados[i].0[j] +
+                       seleccionados[i+1].0[j]) / 2.0;
+            } else {
+                gen = (seleccionados[0].0[j] +
+                       seleccionados[1].0[j]) / 2.0;
+            }
+            cromosoma.push(gen);
+        }
+
+        // En el algoritmo generacional con elitismo necesitamos saber
+        // cuál es el peor para sustituirlo en caso de necesidad. En
+        // el estacionario solo calculamos la f_obj al inicio
+        //
+        // Además el índice se incrementa en 2 porque se reutiliza
+        // para indexar los padres a cruzar
+        if seleccionados.len() > 2 {
+            pob_provisional.push(
+                (cromosoma.clone(),
+                 clasificador_1nn_con_pesos(&datos,
+                                            &datos,
+                                            &cromosoma).2
+                )
+            );
+            
+            i += 2;
+        } else {
+            pob_provisional.push(
+                (cromosoma.clone(),
+                 0.0
+                )
+            );
+            i += 1;
+        }
+    }
+}
+
 
 // Torneo binario
 //
@@ -914,8 +1101,12 @@ fn torneo_binario(
     let f_1 = pob_evaluada[candidato1].1;
     let f_2 = pob_evaluada[candidato2].1;
 
+//    println!("{}  {}", f_1, f_2);
+    
     return if f_1 >= f_2 {candidato1} else {candidato2};
 }
+
+
 
 
 // Método principal: Ejecuta el código de la práctica
@@ -1036,9 +1227,10 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         println!("\tFunción objetivo: {}", resultados_bl.2);
         println!("\tTiempo de ejecución: {}ms\n", tiempo_total);
 
-*/
+         */
+        /*
         let mut variante_cruce = VarianteCruce::ARIT;
-        let pesos_agg = alg_genetico_elitista(&conjunto_entrenamiento,
+        let pesos_agg = alg_genetico_generacional_elitista(&conjunto_entrenamiento,
         seed_u64, variante_cruce);
         let resultados_agg =
         clasificador_1nn_con_pesos(&conjunto_entrenamiento,
@@ -1054,7 +1246,7 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         println!("\tTiempo de ejecución: {}ms\n", tiempo_total);
 
         variante_cruce = VarianteCruce::BLX;
-        let pesos_agg_blx = alg_genetico_elitista(&conjunto_entrenamiento,
+        let pesos_agg_blx = alg_genetico_generacional_elitista(&conjunto_entrenamiento,
         seed_u64, variante_cruce);
         let resultados_agg =
         clasificador_1nn_con_pesos(&conjunto_entrenamiento,
@@ -1069,7 +1261,29 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         println!("\tFunción objetivo: {}", resultados_agg.2);
         println!("\tTiempo de ejecución: {}ms\n", tiempo_total);
 
-    }     
+         
+
+         */
+
+        let mut variante_cruce = VarianteCruce::ARIT;
+        let pesos_age =
+            alg_genetico_estacionario(
+                &conjunto_entrenamiento,
+                seed_u64,
+                variante_cruce); 
+        let resultados_age =
+            clasificador_1nn_con_pesos(&conjunto_entrenamiento,
+                                       &conjunto_validacion, &pesos_age); 
+
+        tiempo_total = tiempo_inicial.elapsed().as_millis();
+
+
+        println!("-- Resultados algoritmo genético estacionario. Cruce aritmético.");
+        println!("\tTasa de clasificación: {}", resultados_age.0);
+        println!("\tTasa de reducción: {}", resultados_age.1);
+        println!("\tFunción objetivo: {}", resultados_age.2);
+        println!("\tTiempo de ejecución: {}ms\n", tiempo_total);
+    }
     
     Ok(())
 }
