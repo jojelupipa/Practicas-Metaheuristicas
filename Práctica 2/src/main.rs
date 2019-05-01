@@ -641,54 +641,20 @@ fn alg_genetico_generacional_elitista<T: DataElem<T> + Copy + Clone>(
                                    PROB_CRUCE_AGG).trunc() as usize;
             
         if variante_cruce == VarianteCruce::ARIT {
-            cruce_aritmetico(&datos, &seleccionados, &mut pob_provisional, n_cruces, num_attributes);
+            cruce_aritmetico(&datos,
+                             &seleccionados,
+                             &mut pob_provisional,
+                             n_cruces,
+                             num_attributes);
             contador_evaluaciones += n_cruces;
             
         } else if variante_cruce == VarianteCruce::BLX {
-                        let mut i = 0;
-            while i < n_cruces {
-                let mut cromosoma = Vec::with_capacity(num_attributes);
-                for j in 0..num_attributes {
-                    let cmax;
-                    let cmin;
-                    
-                    if seleccionados[i].0[j] > seleccionados[i+1].0[j] {
-                        cmax = seleccionados[i].0[j];
-                        cmin = seleccionados[i+1].0[j];
-                    } else {
-                        cmin = seleccionados[i].0[j];
-                        cmax = seleccionados[i+1].0[j];
-                    } 
-                    let interval = (cmax - cmin) * BLX_VALUE as f32;
-
-                    let mut gen;
-                    if cmax != cmin {
-                        gen = rng.gen_range(cmin - interval, cmax +
-                                            interval);
-                        if gen < 0.0 {
-                            gen = 0.0;
-                        } else if gen > 1.0 {
-                            gen = 0.0;
-                        }
-                        
-                    } else {
-                        gen = seleccionados[i].0[j];
-                    }
-                    cromosoma.push(gen);
-                }
-                
-                pob_provisional.push(
-                    (cromosoma.clone(),
-                     clasificador_1nn_con_pesos(&datos,
-                                                &datos,
-                                                &cromosoma).2
-                    )
-                );
-                    
-
-                i += 2;
-            }
-            
+            cruce_blx(&datos,
+                      &seleccionados,
+                      &mut pob_provisional,
+                      n_cruces,
+                      num_attributes,
+                      &mut rng);
             contador_evaluaciones += n_cruces;
         }
 
@@ -829,25 +795,24 @@ fn alg_genetico_estacionario<T: DataElem<T> + Copy + Clone>(
     // evaluaciones
     let mut contador_evaluaciones: usize = 0;
 
+    // Evaluamos esta población
+    let mut pob_evaluada: Vec<(Vec<f32>, f32)> =
+        Vec::with_capacity(TAM_POBLACION);
+    
+    for i in 0..poblacion.len() {
+        pob_evaluada.push(
+            (
+                poblacion[i].clone(),
+                clasificador_1nn_con_pesos(&datos,
+                                           &datos,
+                                           &poblacion[i]).2
+            )
+        );
+    }
+    
+    contador_evaluaciones += TAM_POBLACION;
+
     while contador_evaluaciones < MAXIMO_EVALUACIONES_F_OBJ {
-
-        // Evaluamos esta población
-        let mut pob_evaluada: Vec<(Vec<f32>, f32)> =
-            Vec::with_capacity(TAM_POBLACION);
-        
-        for i in 0..poblacion.len() {
-            pob_evaluada.push(
-                (
-                    poblacion[i].clone(),
-                    clasificador_1nn_con_pesos(&datos,
-                                               &datos,
-                                               &poblacion[i]).2
-                )
-            );
-        }
-        
-        contador_evaluaciones += TAM_POBLACION;
-
         
         // Seleccionamos los dos padres para el estacionario
         let mut seleccionados: Vec<(Vec<f32>, f32)> =
@@ -864,16 +829,22 @@ fn alg_genetico_estacionario<T: DataElem<T> + Copy + Clone>(
         }
 
         let mut pob_provisional: Vec<(Vec<f32>, f32)> =
-            Vec::with_capacity(TAM_POBLACION);
+            Vec::with_capacity(2);
+
         
-        let n_cruces: usize = 30;
+        // Ahora cruzamos los padres hasta obtener los dos candidatos
+        // a entrar en la población de la siguiente generación
+        let n_cruces: usize = 2;
         
-        // Ahora cruzamos los padres hasta obtener la población de la
-        // siguiente generación
         if variante_cruce == VarianteCruce::ARIT {
             cruce_aritmetico(&datos, &seleccionados, &mut pob_provisional, n_cruces, num_attributes);
         } else {
-            //TODO BLX
+            cruce_blx(&datos,
+                      &seleccionados,
+                      &mut pob_provisional,
+                      n_cruces,
+                      num_attributes,
+                      &mut rng);
         }
 
         // Mutamos el número de genes esperado
@@ -882,9 +853,10 @@ fn alg_genetico_estacionario<T: DataElem<T> + Copy + Clone>(
                                     PROB_MUTACION
         ).trunc() as usize;
 
+
         let mut mut_realizadas = 0;
         while mut_realizadas < mutaciones_esperadas {
-            let cromosoma_mut = rng.gen_range(0, TAM_POBLACION);
+            let cromosoma_mut = rng.gen_range(0, seleccionados.len());
             let gen_mut = rng.gen_range(0, num_attributes);
 
             let mut pesos_aux =
@@ -901,18 +873,46 @@ fn alg_genetico_estacionario<T: DataElem<T> + Copy + Clone>(
             pob_provisional.remove(cromosoma_mut);
             pob_provisional.push(
                 (pesos_aux.clone(),
-                 0.0
+                 clasificador_1nn_con_pesos(&datos,
+                                            &datos,
+                                            &pesos_aux).2
                 )
-            );
-            
+            );            
             mut_realizadas += 1;
+            contador_evaluaciones += 1;
+        }
+
+        // Reemplazamos los dos peores cromosomas de la generación
+        // anterior por estos
+        // (En realidad sustituimos cada hijo por el peor que haya en
+        // ese instante, siendo posible que el peor sea el hijo que
+        // acabamos de introducir)
+        for i in 0..seleccionados.len() {
+            let mut min_f = 100.0;
+            let mut min_pos = 0;
+            let mut counter = 0;
+            // Buscamos el peor cromosoma
+            for cromosoma in pob_evaluada.iter() {
+                if cromosoma.1 < min_f {
+                    min_f = cromosoma.1;
+                    min_pos = counter;
+                }
+                counter += 1;
+            }
+
+            // Si es peor que uno de los candidatos, lo expulsamos
+            if min_f < pob_provisional[i].1 {
+                poblacion.remove(min_pos);
+                poblacion.push(pob_provisional[i].0.clone());
+                pob_evaluada.remove(min_pos);
+                pob_evaluada.push(
+                    (
+                        pob_provisional[i].0.clone(),
+                        pob_provisional[i].1)
+                );
+            }
         }
         
-        // Reemplazamos la antigua población con la nueva
-        poblacion = Vec::with_capacity(TAM_POBLACION);
-        for cromosoma in pob_provisional.iter_mut() {
-            poblacion.push(cromosoma.0.clone());
-        }
     }
 
     // Ahora buscamos el mejor cromosoma en la población final para
@@ -1085,6 +1085,69 @@ fn cruce_aritmetico<T: DataElem<T> + Copy + Clone>(
 }
 
 
+fn cruce_blx<T: DataElem<T> + Copy + Clone>(
+    datos: &Vec<T>,
+    seleccionados: & Vec<(Vec<f32>, f32)>,
+    pob_provisional: &mut Vec<(Vec<f32>, f32)>,
+    n_cruces: usize,
+    num_attributes: usize,
+    mut rng: &mut StdRng) {
+    
+    let mut i = 0;
+    while i < n_cruces {
+        let mut cromosoma =
+            Vec::with_capacity(num_attributes);
+        
+        let index = if seleccionados.len() > 2 {i} else
+        {0}; // Así distinguimos  entre AGE y AGG para acceder
+        // a los padres
+        
+        for j in 0..num_attributes {
+            let cmax;
+            let cmin;
+
+            
+            if seleccionados[index].0[j] > seleccionados[index+1].0[j] {
+                cmax = seleccionados[index].0[j];
+                cmin = seleccionados[index+1].0[j];
+            } else {
+                cmin = seleccionados[index].0[j];
+                cmax = seleccionados[index+1].0[j];
+            } 
+            let interval = (cmax - cmin) * BLX_VALUE as f32;
+
+            let mut gen;
+            if cmax != cmin {
+                gen = rng.gen_range(cmin - interval, cmax +
+                                    interval);
+                if gen < 0.0 {
+                    gen = 0.0;
+                } else if gen > 1.0 {
+                    gen = 0.0;
+                }
+                
+            } else {
+                gen = seleccionados[index].0[j];
+            }
+            cromosoma.push(gen);
+        }
+
+        pob_provisional.push(
+            (cromosoma.clone(),
+             clasificador_1nn_con_pesos(&datos,
+                                        &datos,
+                                        &cromosoma).2
+            )
+        );
+        
+        if seleccionados.len() > 2 {
+            i += 2;
+        } else {
+            i += 1;
+        }
+}            
+}
+    
 // Torneo binario
 //
 // Recibe los datos de entrada y dos candidatos y decide el ganador
@@ -1262,8 +1325,7 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         println!("\tTiempo de ejecución: {}ms\n", tiempo_total);
 
          
-
-         */
+*/
 
         let mut variante_cruce = VarianteCruce::ARIT;
         let pesos_age =
@@ -1277,13 +1339,32 @@ fn execute<T: DataElem<T> + Copy + Clone>(
 
         tiempo_total = tiempo_inicial.elapsed().as_millis();
 
-
         println!("-- Resultados algoritmo genético estacionario. Cruce aritmético.");
         println!("\tTasa de clasificación: {}", resultados_age.0);
         println!("\tTasa de reducción: {}", resultados_age.1);
         println!("\tFunción objetivo: {}", resultados_age.2);
         println!("\tTiempo de ejecución: {}ms\n", tiempo_total);
+        
+        variante_cruce = VarianteCruce::BLX;
+        let pesos_age =
+            alg_genetico_estacionario(
+                &conjunto_entrenamiento,
+                seed_u64,
+                variante_cruce); 
+        let resultados_age =
+            clasificador_1nn_con_pesos(&conjunto_entrenamiento,
+                                       &conjunto_validacion, &pesos_age); 
+
+        tiempo_total = tiempo_inicial.elapsed().as_millis();
+
+
+        println!("-- Resultados algoritmo genético estacionario. Cruce BLX.");
+        println!("\tTasa de clasificación: {}", resultados_age.0);
+        println!("\tTasa de reducción: {}", resultados_age.1);
+        println!("\tFunción objetivo: {}", resultados_age.2);
+        println!("\tTiempo de ejecución: {}ms\n", tiempo_total);
     }
+    
     
     Ok(())
 }
