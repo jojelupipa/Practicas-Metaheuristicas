@@ -22,6 +22,9 @@ use rand::prelude::*;
 // Manejo argumentos (para indicar la semilla)
 use std::env;
 
+// Potencias
+extern crate num;
+
 ///////////////// CONSTANTES /////////////////////////////////////
 const NUMERO_PARTICIONES: usize = 5;
 const ALPHA_F_OBJETIVO: f32 = 0.5;
@@ -31,6 +34,10 @@ const PROB_CRUCE_AGG: f32 = 0.7;
 const PROB_MUTACION: f32 = 0.001;
 const PROB_BUSQUEDA_MEMETICO: f32 = 0.1;
 const BLX_VALUE: f64 = 0.3;
+const MU_PHI_TEMP: f32 = 0.3;
+const TEMPERATURA_FINAL: f32 = 0.001;
+const COEF_VECINOS_TEMP: usize = 10;
+const COEF_EXITOS_TEMP: f32 = 0.1;
 
 const TAM_POBLACION_GEN: usize = 30;
 const TAM_POBLACION_MEM: usize = 10;
@@ -1273,6 +1280,93 @@ fn alg_memetico<T: DataElem<T> + Copy + Clone>(
     return pesos;
 }
 
+//////////// Algoritmos práctica 3 ///////////////
+
+fn alg_enfriamiento_simulado<T:DataElem<T> + Copy + Clone>(
+    datos: &Vec<T>,
+    seed_u64: u64)
+    -> Vec<f32> {
+    let num_attributes = T::get_num_attributes();
+    let mut rng: StdRng = SeedableRng::seed_from_u64(seed_u64); // Para generar números aleatorios con una semilla
+
+    // Distribuciones uniforme (inicialización y comprobación de temperatura) y normal (explorador de vecindario)
+    let distribucion_uniforme = Uniform::new(0.0, 1.0);
+    let distribucion_normal = Normal::new(0.0, VARIANZA_MUTACIONES);
+    
+    // Generamos el vector aleatorio inicial
+    let mut pesos: Vec<f32> = vec![0.0; num_attributes];
+    for atributo in 0..num_attributes {
+        pesos[atributo] = distribucion_uniforme.sample(&mut rng);
+    }
+
+    let mut mejor_solucion = pesos.clone();
+
+    // Calculamos temperatura inicial
+    let mut coste = clasificador_1nn_con_pesos(
+        &datos,
+        &datos,
+        &pesos).2;
+    let ln_valor = -(MU_PHI_TEMP).ln();
+
+    let mut temperatura = MU_PHI_TEMP * coste / ln_valor;
+
+    let max_vecinos = COEF_VECINOS_TEMP * num_attributes;
+    let max_exitos = (COEF_EXITOS_TEMP * max_vecinos as f32) as usize;
+    let m = MAXIMO_EVALUACIONES_F_OBJ as f32 / max_vecinos as f32;
+    let beta = (temperatura - TEMPERATURA_FINAL)/(m as f32 * TEMPERATURA_FINAL * temperatura);
+
+    // Bucle externo
+    let mut it = 0;
+    while TEMPERATURA_FINAL < temperatura {
+        let mut vecinos_generados = 0;
+        let mut exitos = 0;
+
+        // Bucle interno
+        while it < MAXIMO_EVALUACIONES_F_OBJ && vecinos_generados < max_vecinos && exitos < max_exitos {
+
+            // Aplicamos el generador de vecindario para obtener una solución candidata
+            let mut pesos_aux = pesos.clone();
+            let indice_a_mutar = rng.gen_range(0, num_attributes);
+            pesos_aux[indice_a_mutar] +=
+                distribucion_normal.sample(&mut rng) as f32;
+            if pesos_aux[indice_a_mutar] < 0.0 {
+                pesos_aux[indice_a_mutar] = 0.0;
+            } else if pesos_aux[indice_a_mutar] > 1.0 {
+                pesos_aux[indice_a_mutar] = 1.0;
+            }
+            let coste_aux = clasificador_1nn_con_pesos(
+                &datos,
+                &datos,
+                &pesos_aux).2;
+
+            // Aceptación de solución
+            let dif_coste = coste - coste_aux;
+            let prob_acept = distribucion_uniforme.sample(&mut rng);
+            let exp_value = (-dif_coste/temperatura).exp();
+            
+            if dif_coste < 0.0 || (prob_acept <= exp_value && dif_coste != 0.0) {
+                exitos += 1;
+                pesos = pesos_aux.clone();
+                coste = coste_aux;
+                if dif_coste < 0.0 {
+                    mejor_solucion = pesos.clone();
+                }
+            }
+            
+            // Control
+            it += 1;
+            vecinos_generados += 1;
+            //println!("it: {}\tVec_gen: {}\tExitos: {}",it, vecinos_generados, exitos);
+            //println!("Sol_act: {}", coste);
+        }
+
+        // Enfriamiento
+        temperatura = temperatura / (1.0 + beta * temperatura);
+    }
+
+    return pesos;
+}
+
 
 //////////////////////////////////////////////////
 ////////// PROCEDIMIENTOS GENERALES //////////////
@@ -1596,8 +1690,8 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         let mut tiempo_inicial = Instant::now();
 
         
-        let resultados_1nn = clasificador_1nn(&conjunto_entrenamiento,
-                                              &conjunto_validacion);
+        // let resultados_1nn = clasificador_1nn(&conjunto_entrenamiento,
+        //                                       &conjunto_validacion);
         
         let mut tiempo_total = tiempo_inicial.elapsed().as_millis();
 
@@ -1643,7 +1737,6 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         println!("-- Resultados clasificador búsqueda local");
         println!("\tT_clas\tT_red\tT_obj\tTiempo");
         println!("\t{}\t{}\t{}\t{}ms\n", resultados_bl.0, resultados_bl.1, resultados_bl.2, tiempo_total);
-         */
         
         tiempo_inicial = Instant::now();
         
@@ -1784,15 +1877,33 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         println!("\tT_clas\tT_red\tT_obj\tTiempo");
         println!("\t{}\t{}\t{}\t{}ms\n", resultados_mem_bl_mejores.0, resultados_mem_bl_mejores.1, resultados_mem_bl_mejores.2, tiempo_total);
 
-        
+         */
+
+        tiempo_inicial = Instant::now();
+
+        let pesos_enfr_simulado =
+            alg_enfriamiento_simulado(
+                &conjunto_entrenamiento,
+                seed_u64);
+
+        let resultados_enfr_simulado =
+            clasificador_1nn_con_pesos(
+                &conjunto_entrenamiento,
+                &conjunto_validacion,
+                &pesos_enfr_simulado);
+
+        tiempo_total = tiempo_inicial.elapsed().as_millis();
+
+        println!("-- Resultados algoritmo enfriamiento simulado.");
+        println!("\tT_clas\tT_red\tT_obj\tTiempo");
+        println!("\t{}\t{}\t{}\t{}ms\n", resultados_enfr_simulado.0, resultados_enfr_simulado.1, resultados_enfr_simulado.2, tiempo_total);
+
     }
-    
     
     Ok(())
 }
 
 fn main() {
-
     let args: Vec<_> = env::args().collect();
     let mut seed_u64: u64 = 4;
     
@@ -1822,6 +1933,4 @@ fn main() {
         println!("error: {}", err);
         process::exit(1);
     }
-
-
 }
