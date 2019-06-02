@@ -576,6 +576,7 @@ fn alg_genetico_generacional_elitista<T: DataElem<T> + Copy + Clone>(
     // Mientras no se cumpla la condición de parada: 15000
     // evaluaciones
     let mut contador_evaluaciones: usize = 0;
+    //let mut generacion = 0;
     while contador_evaluaciones < MAXIMO_EVALUACIONES_F_OBJ {
 
         // Buscamos cuál es la mejor solución de la población actual
@@ -758,6 +759,9 @@ fn alg_genetico_generacional_elitista<T: DataElem<T> + Copy + Clone>(
         } else {
             pesos = poblacion[mejor_cromosoma].clone();
         }
+
+        // println!("{}\t{}", generacion, mejor_f);
+        // generacion += 1;
         
         if !mejor_crom_introducido {
             pob_provisional.remove(peor_cromosoma);
@@ -821,6 +825,7 @@ fn alg_genetico_estacionario<T: DataElem<T> + Copy + Clone>(
     
     contador_evaluaciones += TAM_POBLACION_GEN;
 
+    let mut generacion = 0;
     while contador_evaluaciones < MAXIMO_EVALUACIONES_F_OBJ {
         
         // Seleccionamos los dos padres para el estacionario
@@ -896,6 +901,8 @@ fn alg_genetico_estacionario<T: DataElem<T> + Copy + Clone>(
         // (En realidad sustituimos cada hijo por el peor que haya en
         // ese instante, siendo posible que el peor sea el hijo que
         // acabamos de introducir)
+        
+        //let mut mejor_f = 0.0; // DEBUG: Mostrar mejor por generacion
         for i in 0..seleccionados.len() {
             let mut min_f = 100.0;
             let mut min_pos = 0;
@@ -906,7 +913,12 @@ fn alg_genetico_estacionario<T: DataElem<T> + Copy + Clone>(
                     min_f = cromosoma.1;
                     min_pos = counter;
                 }
-                counter += 1;
+
+                // // DEBUG: Mostrar mejor por generación
+                // if cromosoma.1 > mejor_f {
+                //     mejor_f = cromosoma.1;
+                // }
+                 counter += 1;
             }
 
             // Si es peor que uno de los candidatos, lo expulsamos
@@ -921,8 +933,16 @@ fn alg_genetico_estacionario<T: DataElem<T> + Copy + Clone>(
                 );
             }
         }
+
+        // DEBUG: Mostrar mejor por generación///////////
+        
+        // println!("{}\t{}", generacion, mejor_f);
+        // generacion += 1;
+        
+        ////////////////////
         
     }
+        
 
     // Ahora buscamos el mejor cromosoma en la población final para
     // devolverlo como solución
@@ -986,7 +1006,7 @@ fn alg_memetico<T: DataElem<T> + Copy + Clone>(
     // Condición de parada: 15000 evaluaciones de f. obj.
     let mut contador_evaluaciones: usize = 0;
     let mut contador_busqueda_local = 0; // Cada diez ha de dispararse
-
+    //    let mut generacion = 0; // DEBUG: Mejor por generación
     while contador_evaluaciones < MAXIMO_EVALUACIONES_F_OBJ {
         // Algoritmo genético generacional elitista con cruce BLX
         let mut pob_evaluada: Vec<(Vec<f32>, f32)> =
@@ -1075,6 +1095,7 @@ fn alg_memetico<T: DataElem<T> + Copy + Clone>(
         ).trunc() as usize;
 
         let mut mut_realizadas = 0;
+        
         while mut_realizadas < mutaciones_esperadas {
             let cromosoma_mut = rng.gen_range(0, TAM_POBLACION_MEM);
             let gen_mut = rng.gen_range(0, num_attributes);
@@ -1223,11 +1244,17 @@ fn alg_memetico<T: DataElem<T> + Copy + Clone>(
         }
 
         
+
+        
         if f_mejor_cromosoma_gen_anterior < mejor_f {
             pesos = pob_provisional[mejor_cromosoma_actual].0.clone();
+            //println!("{}\t{}", generacion, mejor_f);// DEBUG: mejor por gen
         } else {
             pesos = poblacion[mejor_cromosoma].clone();
+            //println!("{}\t{}", generacion, f_mejor_cromosoma_gen_anterior);
         }
+        //generacion += 1;
+        
         
         if !mejor_crom_introducido {
             pob_provisional.remove(peor_cromosoma);
@@ -1242,6 +1269,7 @@ fn alg_memetico<T: DataElem<T> + Copy + Clone>(
             poblacion.push(cromosoma.0.clone());
         }
     }
+    process::exit(1);
     return pesos;
 }
 
@@ -1615,10 +1643,12 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         println!("-- Resultados clasificador búsqueda local");
         println!("\tT_clas\tT_red\tT_obj\tTiempo");
         println!("\t{}\t{}\t{}\t{}ms\n", resultados_bl.0, resultados_bl.1, resultados_bl.2, tiempo_total);
-*/ 
+         */
+        
         tiempo_inicial = Instant::now();
         
         let mut variante_cruce = VarianteCruce::ARIT;
+        
         let pesos_agg = alg_genetico_generacional_elitista(&conjunto_entrenamiento,
         seed_u64, variante_cruce);
         let resultados_agg =
@@ -1687,8 +1717,7 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         println!("-- Resultados algoritmo genético estacionario. Cruce BLX.");
         println!("\tT_clas\tT_red\tT_obj\tTiempo");
         println!("\t{}\t{}\t{}\t{}ms\n", resultados_age_blx.0, resultados_age_blx.1, resultados_age_blx.2, tiempo_total);
-
-        
+ 
         tiempo_inicial = Instant::now();
         
  
@@ -1770,8 +1799,8 @@ fn main() {
     if args.len() == 2 {
         seed_u64 = args[1].parse::<u64>().unwrap();
         println!("Se usará como semilla: {}", seed_u64);
-    } else if args.len() > 2 {
-        println!("* Formato incorrecto, se usará 4 como semilla.\nPara usar una semilla concreta utilice cargo run --release <semilla>");
+    } else if args.len() != 2 {
+        println!("* Formato de introducción de semilla incorrecto, se usará 4 como semilla.\nPara usar una semilla concreta utilice cargo run --release <semilla>");
     }
     println!("-----------------------------------------");
     println!("Análisis para el archivo: colposcopy");
