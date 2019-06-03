@@ -34,10 +34,12 @@ const PROB_CRUCE_AGG: f32 = 0.7;
 const PROB_MUTACION: f32 = 0.001;
 const PROB_BUSQUEDA_MEMETICO: f32 = 0.1;
 const BLX_VALUE: f64 = 0.3;
+
 const MU_PHI_TEMP: f32 = 0.3;
 const TEMPERATURA_FINAL: f32 = 0.001;
 const COEF_VECINOS_TEMP: usize = 10;
 const COEF_EXITOS_TEMP: f32 = 0.1;
+const ITERACIONES_ILS: usize = 15;
 
 const TAM_POBLACION_GEN: usize = 30;
 const TAM_POBLACION_MEM: usize = 10;
@@ -486,17 +488,24 @@ fn algoritmo_relief<T: DataElem<T> + Copy + Clone>(
 
 fn busqueda_local<T: DataElem<T> + Copy + Clone>(
     datos: &Vec<T>,
-    seed_u64: u64)
+    seed_u64: u64,
+    sol_inicial: &Vec<f32>)
     -> Vec<f32> {
     let num_attributes = T::get_num_attributes();
     let mut rng: StdRng = SeedableRng::seed_from_u64(seed_u64); // Para generar números aleatorios
 
-    // Generamos el vector aleatorio inicial
-    let mut pesos: Vec<f32> = vec![0.0; num_attributes];
     let distribucion_uniforme = Uniform::new(0.0, 1.0);
     let distribucion_normal = Normal::new(0.0, VARIANZA_MUTACIONES);
-    for atributo in 0..num_attributes {
-        pesos[atributo] = distribucion_uniforme.sample(&mut rng);
+    
+    // Generamos el vector aleatorio inicial
+    let mut pesos: Vec<f32> = vec![0.0; num_attributes];
+
+    if !sol_inicial.ends_with(&pesos) {
+        pesos = sol_inicial.clone();
+    } else {
+        for atributo in 0..num_attributes {
+            pesos[atributo] = distribucion_uniforme.sample(&mut rng);
+        }
     }
 
     // Generamos un vector de índices y lo desordenamos para
@@ -546,16 +555,15 @@ fn busqueda_local<T: DataElem<T> + Copy + Clone>(
                 indices = (0..num_attributes).collect();
                 indices.shuffle(&mut rng);
                 //debug
-                //println!("Vector de pesos mejorado. F_obj: {}",
-                //mejor_f_obj);
+                // println!("Vector de pesos mejorado. F_obj: {}",
+                // mejor_f_obj);
             } else {
                 n_vecinos_gen_sin_mejorar += 1;
             }
             n_mutaciones += 1;
         }    
     
-    return pesos;
-    
+    return pesos;    
 }
 
 
@@ -1367,6 +1375,65 @@ fn alg_enfriamiento_simulado<T:DataElem<T> + Copy + Clone>(
     return pesos;
 }
 
+fn alg_ils<T:DataElem<T> + Copy + Clone>(
+    datos: &Vec<T>,
+    seed_u64: u64)
+    -> Vec<f32> {
+
+    let num_attributes = T::get_num_attributes();
+    let mut rng: StdRng = SeedableRng::seed_from_u64(seed_u64); // Para generar números aleatorios con una semilla
+
+    // Distribuciones uniforme (inicialización y comprobación de temperatura) y normal (explorador de vecindario)
+    let distribucion_uniforme = Uniform::new(0.0, 1.0);
+    
+    // Generamos el vector aleatorio inicial
+    let mut solucion_inicial: Vec<f32> = vec![0.0; num_attributes];
+    for atributo in 0..num_attributes {
+        solucion_inicial[atributo] = distribucion_uniforme.sample(&mut rng);
+    }
+
+    let mut it = 0;
+
+    let f_ini = clasificador_1nn_con_pesos(
+        &datos,
+        &datos,
+        &solucion_inicial).2;
+
+    let mut solucion = busqueda_local(
+        &datos,
+        seed_u64,
+        &solucion_inicial);
+    it += 1;
+    let mut mej_sol = solucion.clone();
+
+    let mut f_mej_sol = clasificador_1nn_con_pesos(
+        &datos,
+        &datos,
+        &solucion).2;
+
+    while it < ITERACIONES_ILS {
+        solucion = mutacion_ils(solucion, &mut rng, num_attributes);
+
+        solucion = busqueda_local(
+            &datos,
+            seed_u64,
+            &solucion);
+        
+
+        let f_obj_actual = clasificador_1nn_con_pesos(
+            &datos,
+            &datos,
+            &solucion).2;
+        
+        if f_obj_actual > f_mej_sol {
+            f_mej_sol = f_obj_actual;
+            mej_sol = solucion.clone();
+        }
+        it +=1;
+    }
+
+    return mej_sol;
+}
 
 //////////////////////////////////////////////////
 ////////// PROCEDIMIENTOS GENERALES //////////////
@@ -1561,7 +1628,7 @@ fn cruce_blx<T: DataElem<T> + Copy + Clone>(
         } else {
             i += 1;
         }
-}            
+    }            
 }
     
 // Torneo binario
@@ -1624,6 +1691,42 @@ fn aux_busqueda_local<T: DataElem<T> + Copy + Clone>(
     }
 }
 
+
+////////////////////////////////////////////
+// Procedimientos especiales trayectorias //
+////////////////////////////////////////////
+
+fn mutacion_ils(
+    solucion: Vec<f32>,
+    mut rng: &mut StdRng,
+    num_attributes: usize)
+    -> Vec<f32> {
+
+    let mezclas = (0.1 * num_attributes as f32) as usize;
+    let mut aux_sol = solucion.clone();
+
+    for contador_mezclas in 0..mezclas {
+        let mut indice_i = rng.gen_range(0, num_attributes);
+        let mut indice_j = rng.gen_range(0, num_attributes);
+
+        while indice_i == indice_j {
+            indice_j = rng.gen_range(0, num_attributes);
+        }
+        //println!("Cambio {} por {}",indice_i, indice_j);
+        let aux = aux_sol[indice_i];
+        aux_sol[indice_i] = aux_sol[indice_j];
+        aux_sol[indice_j] = aux;
+    }
+
+    // Debug: Mostrar cambios
+    // for i in 0..num_attributes{
+    //     if solucion[i] != aux_sol[i] {
+    //         println!("o[{}]= {}\tn[{}]= {}",i,solucion[i], i, aux_sol[i]);
+    //     }
+    // }
+
+    return aux_sol;
+}
 
 
 // Método principal: Ejecuta el código de la práctica
@@ -1879,6 +1982,9 @@ fn execute<T: DataElem<T> + Copy + Clone>(
 
          */
 
+        //// Resultados algoritmos práctica 3
+
+        /*
         tiempo_inicial = Instant::now();
 
         let pesos_enfr_simulado =
@@ -1897,6 +2003,25 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         println!("-- Resultados algoritmo enfriamiento simulado.");
         println!("\tT_clas\tT_red\tT_obj\tTiempo");
         println!("\t{}\t{}\t{}\t{}ms\n", resultados_enfr_simulado.0, resultados_enfr_simulado.1, resultados_enfr_simulado.2, tiempo_total);
+
+        */
+        tiempo_inicial = Instant::now();
+
+        let pesos_ils = alg_ils(
+            &conjunto_entrenamiento,
+            seed_u64);
+
+        let resultados_ils =
+            clasificador_1nn_con_pesos(
+                &conjunto_entrenamiento,
+                &conjunto_validacion,
+                &pesos_ils);
+        
+        tiempo_total = tiempo_inicial.elapsed().as_millis();
+
+        println!("-- Resultados algoritmo ILS.");
+        println!("\tT_clas\tT_red\tT_obj\tTiempo");
+        println!("\t{}\t{}\t{}\t{}ms\n", resultados_ils.0, resultados_ils.1, resultados_ils.2, tiempo_total);
 
     }
     
