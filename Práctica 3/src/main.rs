@@ -40,6 +40,9 @@ const TEMPERATURA_FINAL: f32 = 0.001;
 const COEF_VECINOS_TEMP: usize = 10;
 const COEF_EXITOS_TEMP: f32 = 0.1;
 const ITERACIONES_ILS: usize = 15;
+const TAM_POBLACION_DIFF_EV: usize = 50;
+const PROB_CRUCE_DIFF_EV: f32 = 0.5;
+const COEF_F_DIFF_EV: f32 = 0.5;
 
 const TAM_POBLACION_GEN: usize = 30;
 const TAM_POBLACION_MEM: usize = 10;
@@ -218,6 +221,13 @@ enum VarianteMemetico {
     TODOS_CROMOSOMAS,
     CROM_ALEATORIO_P0_1,
     MEJORES_N_CROMOSOMAS,
+}
+
+// Enum para indicar el tipo de mutación en differential evolution
+#[derive(PartialEq)]
+enum VarianteDiffEv {
+    RAND,
+    CURRENT_TO_BEST,
 }
 
 /////////////// MÉTODOS DE LOS ALGORITMOS ////////////////////
@@ -1435,6 +1445,136 @@ fn alg_ils<T:DataElem<T> + Copy + Clone>(
     return mej_sol;
 }
 
+fn alg_diff_evol<T:DataElem<T> + Copy + Clone>(
+    datos: &Vec<T>,
+    seed_u64: u64,
+    variante_mutacion: VarianteDiffEv)
+    -> Vec<f32> {
+
+    let num_attributes = T::get_num_attributes();
+    let mut rng: StdRng = SeedableRng::seed_from_u64(seed_u64); // Para generar números aleatorios con una semilla
+    let mut pesos: Vec<f32> = vec![0.0; num_attributes];
+    let mut contador_evaluaciones = 0;
+    let cruces_esperados = (PROB_CRUCE_DIFF_EV * num_attributes as f32) as usize;
+    
+    // Generar población inicial
+    let mut poblacion: Vec<Vec<f32>> =
+        Vec::with_capacity(TAM_POBLACION_DIFF_EV);
+
+    inicializar_poblacion(&mut poblacion, &mut rng, num_attributes,
+                          TAM_POBLACION_DIFF_EV);
+
+    // Evaluamos esta población
+    let mut pob_evaluada: Vec<(Vec<f32>, f32)> =
+        Vec::with_capacity(TAM_POBLACION_DIFF_EV);
+    
+    for i in 0..TAM_POBLACION_DIFF_EV {
+        pob_evaluada.push(
+            (
+                poblacion[i].clone(),
+                clasificador_1nn_con_pesos(&datos,
+                                           &datos,
+                                           &poblacion[i]).2
+            )
+        );
+    }
+    
+    contador_evaluaciones += TAM_POBLACION_DIFF_EV;
+    let mut generacion = 0;
+    //    println!("Generación\tFitness");
+    while contador_evaluaciones < MAXIMO_EVALUACIONES_F_OBJ {
+        for i in 0..TAM_POBLACION_DIFF_EV {
+            generacion += 1;
+
+            //DEBUG
+            // let mut f_mej_sol = 0.0;
+            // for elem in pob_evaluada.iter() {
+            //     if elem.1 > f_mej_sol {
+            //         f_mej_sol = elem.1;
+            //     }
+            // }
+            // if generacion % 500 == 0 {
+            //     println!("{}\t{}", generacion, f_mej_sol);
+            // }
+            ////
+            
+            let mut vector_mutado: Vec<f32> = vec![0.0; num_attributes];
+
+            let mut i_mej_sol = 0;
+            if variante_mutacion == VarianteDiffEv::CURRENT_TO_BEST {
+                // Calculamos el mejor vector
+                let mut f_mej_sol = 0.0;
+                let mut counter = 0;
+                for elem in pob_evaluada.iter() {
+                    if elem.1 > f_mej_sol {
+                        f_mej_sol = elem.1;
+                        i_mej_sol = counter;
+                    }
+                    counter += 1;
+                }
+            }
+            
+            // Seleccionamos los individuos distintos correspondientes según la variante de mutación
+            let mut indices: Vec<usize> = (0..TAM_POBLACION_DIFF_EV).collect();
+            indices.remove(i);  // Excluimos el individuo actual de los candidatos
+            indices.shuffle(&mut rng);
+            let r1 = indices.pop().expect("Vector vacío");
+            let r2 = indices.pop().expect("Vector vacío");
+            let mut r3 = 0;
+            if variante_mutacion == VarianteDiffEv::RAND {
+                r3 = indices.pop().expect("Vector vacío");
+            }
+            
+            // Para evitar generar muchos números aleatorios calculamos el número medio de cruces esperado, mezclamos un vector con los índices de los genes y extraemos los correspondientes primeros
+            let mut gen_index: Vec<usize> = (0..num_attributes).collect();
+            gen_index.shuffle(&mut rng);
+            for contador_mut in 0..cruces_esperados {
+                let i_cruce = gen_index.pop().expect("Vector vacío");
+
+                let mut nuevo_valor = 0.0;
+
+                if variante_mutacion == VarianteDiffEv::RAND {
+                    nuevo_valor = pob_evaluada[r1].0[i_cruce] + COEF_F_DIFF_EV * (pob_evaluada[r2].0[i_cruce] - pob_evaluada[r3].0[i_cruce]);
+                } else if variante_mutacion == VarianteDiffEv::CURRENT_TO_BEST {
+                    nuevo_valor = pob_evaluada[i].0[i_cruce] +
+                        COEF_F_DIFF_EV * (pob_evaluada[i_mej_sol].0[i_cruce] - pob_evaluada[i].0[i_cruce]) +
+                        COEF_F_DIFF_EV * (pob_evaluada[r1].0[i_cruce] - pob_evaluada[r2].0[i_cruce]);
+                }
+                if nuevo_valor < 0.0 {
+                    nuevo_valor = 0.0;
+                } else if nuevo_valor > 1.0 {
+                    nuevo_valor = 1.0;
+                }
+                vector_mutado[i_cruce] = nuevo_valor;
+            }
+            
+            while gen_index.len() > 0 {
+                let indice_copia = gen_index.pop().expect("Vector vacío");
+                vector_mutado[indice_copia] = pob_evaluada[i].0[indice_copia];
+            }
+
+            let f_mutado = clasificador_1nn_con_pesos(&datos, &datos, &vector_mutado).2;
+            contador_evaluaciones += 1;
+            
+            if f_mutado > pob_evaluada[i].1 {
+                pob_evaluada[i].0 = vector_mutado.clone();
+                pob_evaluada[i].1 = f_mutado;
+            }            
+        }
+    }
+
+    let mut f_mej_sol = 0.0;
+    pesos = pob_evaluada[0].0.clone();
+    for elem in pob_evaluada.iter() {
+        if elem.1 > f_mej_sol {
+            f_mej_sol = elem.1;
+            pesos = elem.0.clone();
+        }
+    }
+
+    return pesos;
+}
+
 //////////////////////////////////////////////////
 ////////// PROCEDIMIENTOS GENERALES //////////////
 //////////////////////////////////////////////////
@@ -2004,7 +2144,7 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         println!("\tT_clas\tT_red\tT_obj\tTiempo");
         println!("\t{}\t{}\t{}\t{}ms\n", resultados_enfr_simulado.0, resultados_enfr_simulado.1, resultados_enfr_simulado.2, tiempo_total);
 
-        */
+        
         tiempo_inicial = Instant::now();
 
         let pesos_ils = alg_ils(
@@ -2022,7 +2162,52 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         println!("-- Resultados algoritmo ILS.");
         println!("\tT_clas\tT_red\tT_obj\tTiempo");
         println!("\t{}\t{}\t{}\t{}ms\n", resultados_ils.0, resultados_ils.1, resultados_ils.2, tiempo_total);
+         
+        
+        tiempo_inicial = Instant::now();
 
+        let variante_mutacion = VarianteDiffEv::RAND;
+            
+        let pesos_diff_evol_rand = alg_diff_evol(
+            &conjunto_entrenamiento,
+            seed_u64,
+            variante_mutacion
+        );
+
+        let resultados_diff_evol_rand =
+            clasificador_1nn_con_pesos(
+                &conjunto_entrenamiento,
+                &conjunto_validacion,
+                &pesos_diff_evol_rand);
+        
+        tiempo_total = tiempo_inicial.elapsed().as_millis();
+
+        println!("-- Resultados algoritmo Evolución Diferencial - Rand.");
+        println!("\tT_clas\tT_red\tT_obj\tTiempo");
+        println!("\t{}\t{}\t{}\t{}ms\n", resultados_diff_evol_rand.0, resultados_diff_evol_rand.1, resultados_diff_evol_rand.2, tiempo_total);
+         */
+
+        tiempo_inicial = Instant::now();
+        
+        let variante_mutacion = VarianteDiffEv::CURRENT_TO_BEST;
+            
+        let pesos_diff_evol_curr_to_best = alg_diff_evol(
+            &conjunto_entrenamiento,
+            seed_u64,
+            variante_mutacion
+        );
+
+        let resultados_diff_evol_curr_to_best =
+            clasificador_1nn_con_pesos(
+                &conjunto_entrenamiento,
+                &conjunto_validacion,
+                &pesos_diff_evol_curr_to_best);
+        
+        tiempo_total = tiempo_inicial.elapsed().as_millis();
+
+        println!("-- Resultados algoritmo Evolución Diferencial - Current to best.");
+        println!("\tT_clas\tT_red\tT_obj\tTiempo");
+        println!("\t{}\t{}\t{}\t{}ms\n", resultados_diff_evol_curr_to_best.0, resultados_diff_evol_curr_to_best.1, resultados_diff_evol_curr_to_best.2, tiempo_total);
     }
     
     Ok(())
