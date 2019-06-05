@@ -43,6 +43,7 @@ const ITERACIONES_ILS: usize = 15;
 const TAM_POBLACION_DIFF_EV: usize = 50;
 const PROB_CRUCE_DIFF_EV: f32 = 0.5;
 const COEF_F_DIFF_EV: f32 = 0.5;
+const MULTIPLICADOR_MAX_V_SIN_MEJ_BL: usize = 5;
 
 const TAM_POBLACION_GEN: usize = 30;
 const TAM_POBLACION_MEM: usize = 10;
@@ -526,7 +527,7 @@ fn busqueda_local<T: DataElem<T> + Copy + Clone>(
     
     let mut n_mutaciones = 0;
     let mut n_vecinos_gen_sin_mejorar = 0;
-    let max_vecinos_gen_sin_mejorar = 20 * num_attributes;
+    let max_vecinos_gen_sin_mejorar = MULTIPLICADOR_MAX_V_SIN_MEJ_BL * num_attributes;
 
     // Comprobamos la calidad de estos pesos 
     let mut mejor_f_obj = clasificador_1nn_con_pesos(&datos, &datos,
@@ -1294,7 +1295,6 @@ fn alg_memetico<T: DataElem<T> + Copy + Clone>(
             poblacion.push(cromosoma.0.clone());
         }
     }
-    process::exit(1);
     return pesos;
 }
 
@@ -1356,7 +1356,7 @@ fn alg_enfriamiento_simulado<T:DataElem<T> + Copy + Clone>(
                 &datos,
                 &datos,
                 &pesos_aux).2;
-
+           
             // Aceptación de solución
             let dif_coste = coste - coste_aux;
             let prob_acept = distribucion_uniforme.sample(&mut rng);
@@ -1408,7 +1408,6 @@ fn alg_ils<T:DataElem<T> + Copy + Clone>(
         &datos,
         &datos,
         &solucion_inicial).2;
-
     let mut solucion = busqueda_local(
         &datos,
         seed_u64,
@@ -1420,7 +1419,6 @@ fn alg_ils<T:DataElem<T> + Copy + Clone>(
         &datos,
         &datos,
         &solucion).2;
-
     while it < ITERACIONES_ILS {
         solucion = mutacion_ils(solucion, &mut rng, num_attributes);
 
@@ -1441,7 +1439,6 @@ fn alg_ils<T:DataElem<T> + Copy + Clone>(
         }
         it +=1;
     }
-
     return mej_sol;
 }
 
@@ -1483,21 +1480,21 @@ fn alg_diff_evol<T:DataElem<T> + Copy + Clone>(
     let mut generacion = 0;
     //    println!("Generación\tFitness");
     while contador_evaluaciones < MAXIMO_EVALUACIONES_F_OBJ {
-        for i in 0..TAM_POBLACION_DIFF_EV {
-            generacion += 1;
+        generacion += 1;
 
-            //DEBUG
-            // let mut f_mej_sol = 0.0;
-            // for elem in pob_evaluada.iter() {
-            //     if elem.1 > f_mej_sol {
-            //         f_mej_sol = elem.1;
-            //     }
-            // }
-            // if generacion % 500 == 0 {
-            //     println!("{}\t{}", generacion, f_mej_sol);
-            // }
-            ////
-            
+        //DEBUG
+        let mut f_mej_sol = 0.0;
+        for elem in pob_evaluada.iter() {
+            if elem.1 > f_mej_sol {
+                f_mej_sol = elem.1;
+            }
+        }
+        //if generacion % 500 == 0 {
+            //println!("{}\t{}", generacion, f_mej_sol);
+        //}
+        ////
+
+        for i in 0..TAM_POBLACION_DIFF_EV {            
             let mut vector_mutado: Vec<f32> = vec![0.0; num_attributes];
 
             let mut i_mej_sol = 0;
@@ -1943,7 +1940,7 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         println!("Resultados partición: {} ", n_ejecucion);
         
         // Muestra resultados 1nn
-  /*      
+        
         println!("-- Resultados clasificador 1nn");
         println!("\tT_clas\tT_red\tT_obj\tTiempo");
         println!("\t{}\t{}\t{}\t{}ms\n", resultados_1nn.0, resultados_1nn.1, resultados_1nn.2, tiempo_total);
@@ -2120,11 +2117,11 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         println!("\tT_clas\tT_red\tT_obj\tTiempo");
         println!("\t{}\t{}\t{}\t{}ms\n", resultados_mem_bl_mejores.0, resultados_mem_bl_mejores.1, resultados_mem_bl_mejores.2, tiempo_total);
 
-         */
+         
 
         //// Resultados algoritmos práctica 3
 
-        /*
+        
         tiempo_inicial = Instant::now();
 
         let pesos_enfr_simulado =
@@ -2145,6 +2142,7 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         println!("\t{}\t{}\t{}\t{}ms\n", resultados_enfr_simulado.0, resultados_enfr_simulado.1, resultados_enfr_simulado.2, tiempo_total);
 
         
+        
         tiempo_inicial = Instant::now();
 
         let pesos_ils = alg_ils(
@@ -2162,7 +2160,6 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         println!("-- Resultados algoritmo ILS.");
         println!("\tT_clas\tT_red\tT_obj\tTiempo");
         println!("\t{}\t{}\t{}\t{}ms\n", resultados_ils.0, resultados_ils.1, resultados_ils.2, tiempo_total);
-         
         
         tiempo_inicial = Instant::now();
 
@@ -2185,8 +2182,8 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         println!("-- Resultados algoritmo Evolución Diferencial - Rand.");
         println!("\tT_clas\tT_red\tT_obj\tTiempo");
         println!("\t{}\t{}\t{}\t{}ms\n", resultados_diff_evol_rand.0, resultados_diff_evol_rand.1, resultados_diff_evol_rand.2, tiempo_total);
-         */
-
+         
+        
         tiempo_inicial = Instant::now();
         
         let variante_mutacion = VarianteDiffEv::CURRENT_TO_BEST;
@@ -2208,6 +2205,8 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         println!("-- Resultados algoritmo Evolución Diferencial - Current to best.");
         println!("\tT_clas\tT_red\tT_obj\tTiempo");
         println!("\t{}\t{}\t{}\t{}ms\n", resultados_diff_evol_curr_to_best.0, resultados_diff_evol_curr_to_best.1, resultados_diff_evol_curr_to_best.2, tiempo_total);
+
+        
     }
     
     Ok(())
