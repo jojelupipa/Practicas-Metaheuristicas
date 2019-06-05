@@ -1,0 +1,10 @@
+[package]
+name = "mh_p1"
+version = "0.1.0"
+authors = ["jojelupipa <jesus_38b@hotmail.com>"]
+edition = "2018"
+
+[dependencies]
+csv = "1.0.5"
+rand = "0.6.5"
+num = "0.2"
