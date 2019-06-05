@@ -1930,8 +1930,8 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         let mut tiempo_inicial = Instant::now();
 
         
-        // let resultados_1nn = clasificador_1nn(&conjunto_entrenamiento,
-        //                                       &conjunto_validacion);
+         let resultados_1nn = clasificador_1nn(&conjunto_entrenamiento,
+                                               &conjunto_validacion);
         
         let mut tiempo_total = tiempo_inicial.elapsed().as_millis();
 
@@ -1963,9 +1963,9 @@ fn execute<T: DataElem<T> + Copy + Clone>(
         // Búsqueda local
 
         tiempo_inicial = Instant::now();
-        
+        let pesos_inicial = vec![0.0; T::get_num_attributes()];
         let pesos_busqueda_local =
-            busqueda_local(&conjunto_entrenamiento, seed_u64);
+            busqueda_local(&conjunto_entrenamiento, seed_u64, &pesos_inicial );
 
         let resultados_bl =
         clasificador_1nn_con_pesos(&conjunto_entrenamiento,
